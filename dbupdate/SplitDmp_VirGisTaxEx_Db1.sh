@@ -12,13 +12,13 @@ arbeitsvz=/home/blast_db/taxLok.tmp
   
 ########################################################################### Definitionen #################################################################
 
-array=(gi_taxid_nucl gi_taxid_prot taxid_gi_nucl childParentTaxid parentChildTaxid taxid_acc_nucl taxid_acc_prot)                                                         # array enthält prot und nucl .dmp Dateien
+array=(gi_taxid_nucl gi_taxid_prot taxid_gi_nucl childParentTaxid parentChildTaxid taxid_acc_nucl taxid_acc_prot)                                                         # array enthÃ¤lt prot und nucl .dmp Dateien
 blast=/home/Software/ncbi-blast-2.4.0+/bin/                                                                                            # orginal Blastpfad
 taxvz=/home/blast_db/taxonomy                                                                             # orginal Taxonomy-db pfad
 data=TID-10239_Viridae_NuclGis.txt                                                                        # TID-10239_Viridae_Gis.txt
 dat=TID-10239_Viridae.fna                                                                                 # TID-10239_Viridae.fna
 virendmp=TID-10239_Viridae_gi-taxid-nucl.dmp                                                                
-  # neue .dmp-Datei mit den Gi-Taxids nur für die Viren (ermöglicht beim Scannen schnelleren Zugriff)
+  # neue .dmp-Datei mit den Gi-Taxids nur fÃ¼r die Viren (ermÃ¶glicht beim Scannen schnelleren Zugriff)
 
 # erste Vorbereitungen
 if [ -d $arbeitsvz ] ; then                                                                               # |
@@ -26,17 +26,17 @@ if [ -d $arbeitsvz ] ; then                                                     
   echo -e "Please delete or rename this Folder and start the analysis again.\n"                           # | Ordner bereits existiert.
   exit                                                                                                    # V
 fi
-for a in ${array[*]} ; do mkdir -p ${arbeitsvz}/$a ; done   																							# -p unterdrückt Fehlermeldungen
+for a in ${array[*]} ; do mkdir -p ${arbeitsvz}/$a ; done   																							# -p unterdrÃ¼ckt Fehlermeldungen
 cd $arbeitsvz                                                                                             # Wechsel ins aktuelle Vz
 for a in ${array[*]} ; do ln -s $taxvz/$a.dmp $a/$a.dmp 2>/dev/null ; done                                # Link von der Orginal .dmp-Dateien erzeugen
 
 ########################################################################### Funktionen ###################################################################
 
-# Funktion zum Splitten der Orginal-.dmp-Datei in 100 Stücke zum effizienteren Durchsuchen
+# Funktion zum Splitten der Orginal-.dmp-Datei in 100 StÃ¼cke zum effizienteren Durchsuchen
 function OrgDmpDataSplitting()                                                                            # Funktionsname OrgDmpDataSplitting
 { grep "^$line" $a.dmp > $a/$a-${line}.dmp ;}                                                          # hole alle 12...... > gi_taxid_nucl-12.dmp
                                                          
-# Schnellere Grep-Funktion zur Zuordnung der viralen-Taxids aus den gesplitteten .dmp-Dateien über Case  
+# Schnellere Grep-Funktion zur Zuordnung der viralen-Taxids aus den gesplitteten .dmp-Dateien Ã¼ber Case  
 function GiExtraction()                                                                                       
 {
   case "${line}" in                                                                                       # line: jeweilige Viridae-Gi
@@ -163,7 +163,7 @@ function GiExtraction()
 # schnelle Funktion zur Extraktion der Sequencen aus der lokalen NCBInt-Datenbank
 function GiDownload()                                                                                     # Funktionsname GiDownload
 { more $i | $blast/blastdbcmd -db /home/blast_db/ncbi/nt -entry_batch - -out ${i}.fna 2>/dev/null ;}      # Blast Sequenzextraktionsbefehl
-  # jede i (part-xy) mit den darin enthaltenen GIs wird an die NCBI db übergeben und als Fasta Datei wieder ausgespuckt
+  # jede i (part-xy) mit den darin enthaltenen GIs wird an die NCBI db Ã¼bergeben und als Fasta Datei wieder ausgespuckt
   
 ####################################################################### Funktionsaufrufe #################################################################
 
@@ -192,16 +192,16 @@ paste parentTaxid.tmp childTaxid.tmp | sort > parentChildTaxid.dmp              
 rm parentTaxid.tmp ; rm childTaxid.tmp
 
 
-# Start der Splitfunktion der Orginal-.dmp -Datei für nucl und prot in 99 Einzeldateien zum schnelleren Zugriff
-for a in ${array[*]} ; do                                                             # array enthält prot - und nucl .dmp Dateien
+# Start der Splitfunktion der Orginal-.dmp -Datei fÃ¼r nucl und prot in 99 Einzeldateien zum schnelleren Zugriff
+for a in ${array[*]} ; do                                                             # array enthÃ¤lt prot - und nucl .dmp Dateien
   echo -ne "\nSplitting of $a.dmp file... "                                           # Splitinfo zur entspr. .dmp Datei
   i=10                                                                                # Initialisierung i=10
   until (( $i == 100 )) ; do echo $i >> zahlen.txt ; ((i=$i+1)) ; done                # Zahlen von 10-99 werden in zahlen.txt geschrieben 
-  while read line ; do OrgDmpDataSplitting $line & done < zahlen.txt ; wait         # Funktionsaufruf für Splitten der .dmp Datei in 89 Einzelteile
-  i=1                                                                                 # Initialisierung i=1 für 1-9
-  until (( $i == 10 )) ; do                                                          # im Prinzip äquivalent zur Splitfunktion, außer dass nur 
+  while read line ; do OrgDmpDataSplitting $line & done < zahlen.txt ; wait         # Funktionsaufruf fÃ¼r Splitten der .dmp Datei in 89 Einzelteile
+  i=1                                                                                 # Initialisierung i=1 fÃ¼r 1-9
+  until (( $i == 10 )) ; do                                                          # im Prinzip Ã¤quivalent zur Splitfunktion, auÃŸer dass nur 
     grep "^\<$i\>" $a.dmp > $a/$a-$i.dmp &                                         # die GIs 1-9 verwendet werden, ohne darauffolgende Ziffern
-    ((i=$i+1))                                                                        # nach jeder Gi Extraktion wird zahl um 1 erhöht  
+    ((i=$i+1))                                                                        # nach jeder Gi Extraktion wird zahl um 1 erhÃ¶ht  
   done ; wait ; rm zahlen.txt                                                        # Verteilung auf alle Kerne (max 9 in diesem Fall)
 done                                                                                  # und fertig
 
@@ -217,18 +217,18 @@ cat VirenTaxIDs-*.txt | sort | uniq > VirenTaxIDs-su.txt                        
 echo -ne "\nCutting viral GI column... " ; cut -f1 tmp.dmp | sed '/^$/d' > tmp_taxid.dmp  # |
 echo -ne "\nCutting viral TaxID column... " ; cut -f2 tmp.dmp | sed '/^$/d' > tmp_gi.dmp  # | Gi & TaxID Spalten werden wieder vertauscht
 echo -ne "\nCombining columns... " ; paste tmp_gi.dmp tmp_taxid.dmp > $virendmp           # V
-rm VirenTaxIDs-*.txt ; rm tmp*.dmp                                                        # Entfernen der temporären TaxID Dateien 
+rm VirenTaxIDs-*.txt ; rm tmp*.dmp                                                        # Entfernen der temporÃ¤ren TaxID Dateien 
 
 # Extraktion aller viralen Sequenzen aus der lokalen NCBI Datenbank und Erstellen einer entsprechenden Blastdatenbank
 echo -ne "\nSequence isolation... "                                                   # Startinfo
-((p=`wc -l < $virendmp`/96))                                                          # Ermittlung der Zeilenanzahl für die Splitdateien
+((p=`wc -l < $virendmp`/96))                                                          # Ermittlung der Zeilenanzahl fÃ¼r die Splitdateien
 cut -f1 -d " " $virendmp | split -l $p - part-                                               # Split der .dmp Datei (nur Gi Spalte)
 (for i in part-* ; do GiDownload $i & done ; wait)                                    # Start der Downloadfunktion
-cat part-*.fna > $dat                                                                 # alle fasta Dateien werden in eine große überführt
-rm part-*                                                                             # und die Teilstücke entfernt
-echo -ne "\nCreate Blast database... "                                                # Info über Prozessbeendigung und die nächste Aktion
+cat part-*.fna > $dat                                                                 # alle fasta Dateien werden in eine groÃŸe Ã¼berfÃ¼hrt
+rm part-*                                                                             # und die TeilstÃ¼cke entfernt
+echo -ne "\nCreate Blast database... "                                                # Info Ã¼ber Prozessbeendigung und die nÃ¤chste Aktion
 $blast/makeblastdb -dbtype nucl -in $dat -out ${dat}-DB 1>/dev/null                   # Erstellen einer Blastdatenbank aus der Vieren Fastadatei
-rm TID-10239_Viridae.fna                  # Entfernen aller überflüssigen Dateien
+rm TID-10239_Viridae.fna                  # Entfernen aller Ã¼berflÃ¼ssigen Dateien
 
 if [ -d /home/blast_db/taxLok ]
     then
