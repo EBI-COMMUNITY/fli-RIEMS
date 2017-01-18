@@ -1,0 +1,26 @@
+-j/i/t obligatory:  Specify sequence input file including path
+                    'RIEMS' will only accept fasta-, fastq- and sff-file formats
+                    -i Illumina input data
+                    -t Ion Torrent input data
+                    -j unspecified input data
+                    it is possible to add multiple sequence input files of multiple sequence platforms
+                    If using multiple sequence input files, please specify each data file separately                                     
+
+-o obligatory:      Enter target directory for the output (full path)                                                  
+
+-p optional:        Project name, if not given project name will be named by input file
+                    If multiple input files were selected the first one is used as project name
+
+-x optional:        Pre-Screening by given TaxID
+                    multiple TaxID can be given but must be "," seperated.
+                    Please add TaxID on species level or below. TaxIDs above species level can not be used by RIEMS.
+
+-r optional:        Specify if a resultprotocol should be created (n, y). Default is y
+
+-f optinal:         Further analysis (n, y), unclassified reads will be classified on protein level
+                    Default is y
+                    
+Example 1:          ../RIEMS/Metagenomanalyse.sh -j path/filename.fna -o path/outputdir                                         
+Example 2:          ../RIEMS/Metagenomanalyse.sh -j path/filename1.fna -i path/filename2.fastq -o path/outputdir -p ProjectX -r y -x 9606,562
+
+Note:               Please to not use underlines "_". If you use them anyway they will be substituted to hyphens "-" 

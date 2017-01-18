@@ -1,0 +1,671 @@
+\documentclass[a4paper]{article}
+
+%Voreinstellungen und benötigte Packages
+\parindent0pt
+\usepackage[colorlinks=true,urlcolor=blue,linkcolor=blue,linktocpage=true]{hyperref}
+\usepackage[singlelinecheck=false]{caption}
+\usepackage{setspace}
+\usepackage{pdflscape}
+\usepackage[utf8]{inputenc}
+\usepackage[left=2cm,right=2cm,top=2cm,bottom=1cm,footskip=15pt]{geometry}
+\usepackage{colortbl}
+\usepackage{color}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{lastpage}
+\usepackage{fancyhdr}
+\usepackage{amssymb} 
+\usepackage{float} 
+%\usepackage{siunitx}
+\renewcommand{\thesubsection}{\arabic{subsection}}
+\fancyhf{}
+\rhead{\fancyplain{}{Result Report}}
+\lhead{\fancyplain{}{\rightmark }} 
+\begin{document}
+
+<<r global_variables, include=FALSE>>=
+########### Globale Variablen für alle weiteren Chunks vordefinieren
+##########################################################
+
+################imported information
+##################################
+knit_hooks$set(crop = hook_pdfcrop)
+
+arbeitsvz <- as.character(Sys.getenv("arbeitsvz"))
+setwd(arbeitsvz)
+opts_knit$set(root.dir = arbeitsvz)
+samples <- read.table("input.txt", stringsAsFactors = F)
+if(nrow(samples)>1){
+    input <- paste(samples[,1],collapse = ", ")
+}else{
+    input <- paste(samples[,1],collapse = "")
+}
+emboss <- as.character(Sys.getenv("emboss"))
+catnewbler <- gsub("\\_","-",as.character(Sys.getenv("catnewbler")))
+blastv <- as.character(Sys.getenv("blastv"))
+blastdbv <- as.character(Sys.getenv("blastdbv"))
+md5complete <- as.character(Sys.getenv("md5complete"))
+md5compact <- as.character(Sys.getenv("md5compact"))
+date1 <- as.character(Sys.getenv("date1"))
+date2 <- as.character(Sys.getenv("date2"))
+r <- version$version.string
+texversion <- as.character(Sys.getenv("texversion"))
+projektname <- as.character(Sys.getenv("projektname"))
+complete<- paste(projektname,"-resultprotocol-complete.txt",sep="")
+compact<- paste(projektname,"-resultprotocol-compact.txt",sep="")
+completepep<- paste(projektname,"-resultprotocol-complete-pep.txt",sep="")
+compactpep<- paste(projektname,"-resultprotocol-compact-pep.txt",sep="")
+restreads <-  as.numeric(Sys.getenv("restreads"))
+lowqual <- as.numeric(Sys.getenv("lowqual"))
+totalreads <- as.numeric(Sys.getenv("totalreads"))
+
+dateFurther1 <- as.character(Sys.getenv("dateFurther1"))
+dateFurther2 <- as.character(Sys.getenv("dateFurther2"))
+md5completepep <- as.character(Sys.getenv("md5completepep"))
+md5compactpep <- as.character(Sys.getenv("md5compactpep"))
+
+################ Data frames
+###########################
+TaxIDs <- read.table("resultprotocol-compact.txt",sep="\t",dec=".",header=T,stringsAsFactors = F, fill = T, comment.char="")
+trimmed.length <- read.table(file = "trimmed.length.txt",quote = "",sep = "\t",dec = ".",na = "",header = T,stringsAsFactors = F)
+raw.length <- read.table(file = "raw.length.txt",quote = "",sep = "\t",dec = ".",na = "",header = T,stringsAsFactors = F)
+trimmed.length.pep <- read.table(file = "trimmed.length-pep.txt",quote = "",sep = "\t",dec = ".",na = "",header = T,stringsAsFactors = F)
+raw.length.pep <- read.table(file = "raw.length-pep.txt",quote = "",sep = "\t",dec = ".",na = "",header = T,stringsAsFactors = F)
+uncl.trim <- read.table(file = "uncl.trim.txt",quote = "",sep = "\t",dec = ".",na = "",header = T,stringsAsFactors = F)
+input_report <- read.table(file = "input_report.txt", quote = "", sep = "\t", header = F, stringsAsFactors = F)
+Further <- read.table("resultprotocol-compact-pep.txt",sep="\t",dec=".",header=T,stringsAsFactors = F, fill = T, comment.char="")
+
+if("illumina input" %in% input_report[,1]) 
+{
+	illumina <- "$\\checkmark$"
+}else{
+	illumina <- "\\--"
+}
+
+if("ionTorrent input" %in% input_report[,1]) 
+{
+	ionTorrent <- "$\\checkmark$"
+}else{
+	ionTorrent <- "\\--"
+}
+
+if("unspecified input" %in% input_report[,1]) 
+{
+	unspecified <- "$\\checkmark$"
+}else{
+	unspecified <- "\\--"
+}
+
+
+
+
+SkTax <- c(2,2759,2157,10239,12884)
+Names <- c("Bacteria","Eukaryote","Archaea","Virus","Viroid")
+farben <- c("darkgoldenrod1","deepskyblue3","chartreuse3","deeppink2","aquamarine2")
+SkTaxNames <- data.frame(SkTax,Names,farben,stringsAsFactors = F)
+SkTaxNames <- SkTaxNames[order(SkTaxNames$Names),]
+FamTaxNames <- read.table("famtax_names.txt",sep="\t",header=F,stringsAsFactors = F)
+FamTaxNames <- na.omit(FamTaxNames)
+FamTaxNamesPep <- read.table("famtax_names_pep.txt",sep="\t",header=F,stringsAsFactors = F)
+FamTaxNamesPep <- na.omit(FamTaxNamesPep)
+
+auswahl <- unique(TaxIDs$SkTax)
+colour <- SkTaxNames[which((SkTaxNames$SkTax %in% auswahl)==TRUE),c(1,3)]
+
+################# used functions and packages
+##########################################
+require(ggplot2)
+require(wordcloud)
+require(xtable)
+require(SciencesPo)
+require(plyr)
+
+@
+
+\thispagestyle{empty}
+<<Wordcloud,echo=F,comment="",warning=FALSE,message=FALSE,fig.align='center',fig.height=75,fig.width=75, crop = TRUE>>=
+########### Wordcloud für das Deckblatt
+###################################
+
+freq <- sum(TaxIDs$counts)
+header <- "RIEMS 4.0"
+header2 <- samples[,1]
+header2 <- strtrim(header2,35) 
+freq2 <- rep(freq*0.66,nrow(samples))
+wordcloud(words = c(header,header2,TaxIDs$Species,Further$Species),freq = c(freq,freq2,TaxIDs$counts, Further$counts),min.freq = 1,random.order = F,colors = farben,random.color = T,rot.per=.35, scale = c(25,5))
+@
+
+\newpage
+\pagestyle{fancy}
+\setcounter{page}{1}
+\rfoot{\thepage\ of \pageref{LastPage}}
+\lfoot{\Sexpr{projektname}-resultprotocol\_further.pdf}
+
+\tableofcontents
+\listoffigures % gegebenenfall raus
+\listoftables % gegebenenfall raus
+\newpage
+
+\section{Introduction}
+RIEMS 4.0 follows the general analysis strategy outlined in \footnote{\label{fn:RIEMS-ref}Scheuch, M., D. Höper and M. Beer (2015). ``RIEMS: a software pipeline for sensitive and comprehensive taxonomic classification of reads from metagenomics datasets.'' BMC Bioinformatics 16(1): 69.}. RIEMS combines several established software applications and different sequence analyses are cascaded with decreasing stringency of the assignments to allow for the highest possible reliability and sensitivity of the read classifications. RIEMS by default neither requires prior information concerning the sample origin nor other input for read classification, e.g. to distinguish between host and pathogen. Rather, RIEMS automatically detects the most abundant species and screens the complete dataset for the respective sequences. RIEMS repetitively runs through detection of abundant species. To this end, RIEMS repeatedly extracts random data subsets which are assembled and classified and subsequently the complete dataset is screened for the detected species. Moreover, for unbiased taxonomic classification based on the most similar sequence, RIEMS does not rely on restricted databases but uses the full content of the INSDC databases. As an additional analysis layer, RIEMS can switch to amino acid sequences for the analyses of reads and contigs remaining taxonomically unclassified after analysis of the nucleic acid sequences.
+\subsection*{Important Notes}
+\textcolor{red}{Diagnostic metagenomic analysis is a screening technology, the detection of sequence fragments with identity with known sequences is no proof for the presence of a certain species in the sample the dataset is derived from. Therefore, the results of this analysis need to be confirmed by other means.}\\  \\
+Please be aware that all taxonomic assignments in this report are based on nucleotide and/or amino acid sequence comparisons. This means that the taxonomic assignments are based on the identity of the input reads (and eventually contigs assembled from the input reads) and the most identical sequence present in the INSDC sequence databases and taxonomically classified according to information from the NCBI taxonomy database. The range of identities between query and subject sequences is listed in the summarised result report. As is the case for all alignment based classifications, the highest identity does not necessarily mean that a certain species or strain was detected but only that no other sequence with higher identity with the query sequence is known. The rules that are generally applied for the sequence based demarcation of species have to be applied here as well. It may be necessary to verify the alignments to make sure the classifications are correct.\\  \\
+If you use RIEMS results for publications, please cite \textsuperscript{\ref{fn:RIEMS-ref}}.
+\newpage
+\section{Technical summary}
+Below you find an overview of important parameters of the analysis, including information about result files and their md5 checksums to check the integrity of the files, software versions, and database version. Please note that for compatibility reasons, underscores in filenames are replaced by hyphens.
+\singlespacing
+\begin{longtable}{ll}%[ht]
+%\begin{tabular}{ll}
+\vspace{0.25cm}
+\textbf{\textit{sample:}} & \parbox[t]{10cm}{\Sexpr{input}} \\ 
+\vspace{0.25cm}
+\textbf{\textit{Illumina input:}} & \Sexpr{illumina} \\ 
+\vspace{0.25cm}
+\textbf{\textit{IonTorrent input:}} & \Sexpr{ionTorrent} \\ 
+\vspace{0.25cm}
+\textbf{\textit{unspecified input:}} & \Sexpr{unspecified} \\ 
+\vspace{0.25cm}
+\textbf{\textit{start of basic analysis:}} &  \Sexpr{date1} \\ 
+\vspace{0.25cm} 
+\textbf{\textit{end of basic analysis:}} & \Sexpr{date2} \\ 
+\vspace{0.25cm}
+\textbf{\textit{start of further analysis:}} &  \Sexpr{dateFurther1} \\ 
+\vspace{0.25cm} 
+\textbf{\textit{end of further analysis:}} & \Sexpr{dateFurther2} \\ 
+\vspace{0.25cm}
+\textbf{\textit{complete resultprotocol (basic):}} & \parbox[t]{10cm}{\Sexpr{complete}} \\ 
+\vspace{0.25cm}
+\textbf{\textit{md5sum:}}  & \Sexpr{md5complete} \\ 
+\vspace{0.25cm}
+\textbf{\textit{compact resultprotocol (basic):}}  & \parbox[t]{10cm}{\Sexpr{compact}} \\ 
+\vspace{0.25cm}
+\textbf{\textit{md5sum:}}  & \Sexpr{md5compact} \\ 
+\vspace{0.25cm}
+\textbf{\textit{complete resultprotocol (further):}} & \parbox[t]{10cm}{\Sexpr{completepep}} \\ 
+\vspace{0.25cm}
+\textbf{\textit{md5sum:}}  & \Sexpr{md5completepep} \\ 
+\vspace{0.25cm}
+\textbf{\textit{compact resultprotocol (further):}}  & \parbox[t]{10cm}{\Sexpr{compactpep}} \\ 
+\vspace{0.25cm}
+\textbf{\textit{md5sum:}}  & \Sexpr{md5compactpep} \\ 
+\vspace{0.25cm}
+\textbf{\textit{version newbler (454):}} & \parbox[t]{8cm}{\Sexpr{catnewbler}} \\ 
+\vspace{0.25cm}
+\textbf{\textit{version emboss:}} &  \Sexpr{emboss} \\ 
+\vspace{0.25cm}
+\textbf{\textit{version blast:}} &  \Sexpr{blastv} \\ 
+\vspace{0.25cm}
+\textbf{\textit{version blast database:}} &  \Sexpr{blastdbv} \\ 
+\vspace{0.25cm}
+\textbf{\textit{version r:}} &  \Sexpr{r}\\ 
+\vspace{0.25cm}
+\textbf{\textit{version \LaTeX{}:}} & \Sexpr{texversion}\\
+%\end{tabular} 
+\end{longtable}
+\newpage
+
+\section{Input data and overall classification}
+
+<<r global_variables2, include=FALSE>>=
+sum <- totalreads - restreads - lowqual
+classified <- as.character(format(sum,big.mark=".", scientific = F))
+totalreads <- as.character(format(totalreads,big.mark = ".",scientific = F))
+lowqual <- as.character(format(lowqual,big.mark = ".",scientific = F))
+restreads <- as.character(format(restreads,big.mark = ".",scientific = F))
+sumf <- sum(Further$counts)
+classifiedf <- as.character(format(sumf,big.mark=".", scientific = F))
+@
+
+\begin{table}[ht]
+\begin{tabular}{ll}
+\vspace{0.25cm}
+\textbf{\textit{total number of reads:}} &  \Sexpr{as.character(totalreads)} \\ 
+\vspace{0.25cm}
+\textbf{\textit{number of excluded reads (low quality / too short):}} & \Sexpr{as.character(lowqual)} \\ 
+\vspace{0.25cm}
+\textbf{\textit{number of reads classified by basic analysis:}} &  \Sexpr{as.character(classified)} \\ 
+\vspace{0.25cm}
+\textbf{\textit{number of reads classified by further analysis:}} &  \Sexpr{as.character(classifiedf)} \\ 
+\vspace{0.25cm}
+\textbf{\textit{number of unclassified reads:}} &  \Sexpr{as.character(restreads)} \\ 
+\end{tabular} 
+\end{table}
+\vspace{-0.5cm}
+<<Histogram_Raw_Trimmed_unclassified,echo=F,fig.height=8,fig.width=5,fig.align='center',warning=FALSE,message=FALSE,fig.cap='Read length distributions of the raw input dataset (upper panel), the trimmed read dataset (middle), and the finally unclassified reads (lower).',fig.scap='Read length distributions (basic analysis)',crop = TRUE, fig.pos='H'>>=
+
+col <- sample(farben,1)
+
+t.length <- cbind(trimmed.length,2)
+r.length <- cbind(raw.length,1)
+uncl.length <- cbind((uncl.trim$Trimpoint.End - uncl.trim$Trimpoint.Start + 1),3)
+
+colnames(t.length) <- colnames(r.length) <- colnames(uncl.length) <- c("Length","Facet")
+lengths <- as.data.frame(rbind(r.length,t.length,uncl.length),stringsAsFactors=F)
+lengths$Facet <- factor(lengths$Facet)
+
+lengths$Facet <- revalue(lengths$Facet,c("1"="Raw Reads","2"="Trimmed Reads","3"="unclassified Reads"))
+ggplot(lengths,aes(x=Length)) + geom_histogram(fill=col,colour="black") + facet_grid(Facet ~ .) + theme(plot.margin = unit(c(0,0,0,0), "cm"))
+#+ ggtitle("Read-Length-Histogram")
+@
+
+<<Histogram_Raw_Trimmed_unclassified_pep,echo=F,fig.height=6,fig.width=5,fig.align='center',warning=FALSE,message=FALSE,fig.cap='Read length distributions of the input dataset (upper panel) and the trimmed reads (lower).',fig.scap='Read length distributions (further analysis)',crop = TRUE, fig.pos='H'>>=
+
+col <- sample(farben,1)
+
+t.length <- cbind(trimmed.length.pep,2)
+r.length <- cbind(raw.length.pep,1)
+
+colnames(t.length) <- colnames(r.length) <- c("Length","Facet")
+lengths <- as.data.frame(rbind(r.length,t.length),stringsAsFactors=F)
+lengths$Facet <- factor(lengths$Facet)
+
+lengths$Facet <- revalue(lengths$Facet,c("1"="Raw Reads","2"="Trimmed Reads"))
+ggplot(lengths,aes(x=Length)) + geom_histogram(fill=col,colour="black") + facet_grid(Facet ~ .) + theme(plot.margin = unit(c(0,0,0,0), "cm"))
+# + ggtitle("Read-Length-Histogram")
+@
+
+\newpage
+\section{Short summary of the classifications - the most abundant species}
+%On the next pages you can see the distribution of the \textbf{Superkingdom TaxIDs}, the \textbf{Family TaxIDs} and the \textbf{Species TaxIDs}.
+<<r global_variables3, include=FALSE>>=
+uniqueSkTax <- unique(TaxIDs$SkTax)
+label1 = SkTaxNames[which(uniqueSkTax[1] == SkTaxNames[,1]),2]
+label2 = SkTaxNames[which(uniqueSkTax[length(uniqueSkTax)] == SkTaxNames[,1]),2]
+@
+
+Part 1 of this section provides you with an overview of the classification results of the basic analysis. In figures \ref{fig:Superkingdom_TaxID} - \ref{fig:Species_TaxID} the classifications are summarised graphically at different taxonomic levels, and the most abundant species for each superkingdom are presented in table \ref{tab:\Sexpr{label1}} - \ref{tab:\Sexpr{label2}}. Part 2 provides an overview of the classification results of the further analysis. In figures \ref{fig:Superkingdom_TaxID_pep} and \ref{fig:Species_TaxID_pep} the classifications are summarised graphically at different taxonomic levels, and the most abundant species for each superkingdom are presented in table \ref{tab:common_species_pep}.
+
+\subsection*{Part 1: Basic Analysis}
+<<Superkingdom_TaxID, echo=F,comment="",warning=FALSE,message=FALSE,fig.height=6.5,fig.width=6.5,fig.align='center', fig.cap='Pie chart of percentages of the reads classified into superkingdoms. In the legend, the absolute number of reads classified into the respective taxa is given.', fig.pos='H', crop = TRUE>>=
+
+result_sk <- TaxIDs[,c(3,6)]
+result_sk$Superkingdom <- 0
+for( i in 1:nrow(SkTaxNames)){
+	n <- which(result_sk$SkTax==SkTaxNames[i,1])
+	
+	result_sk$Superkingdom[n] <- SkTaxNames[i,2]
+	
+}
+
+counts <- data.frame(SkTax= unique(result_sk$SkTax),Superkingdom=unique(result_sk$Superkingdom))
+counts$counts <- 0
+j=1
+for(i in counts$SkTax){
+	
+	counts$counts[j] <- c(sum(result_sk$counts[which(result_sk$SkTax==i)]))
+	j<-j+1
+	
+}
+values <- counts[,3]
+
+counts$labels <- paste(counts$Superkingdom," (n = ",counts$counts,")",sep="")
+
+bp <- ggplot(counts,aes(x="",y=counts,fill=labels)) +geom_bar(width=1,stat="identity")
+pie <- bp + coord_polar("y",start=90)
+pie <- pie + scale_fill_manual(values = colour[,2]) + labs(fill="Superkingdom") + theme(plot.margin = unit(c(0.5,0.5,0.5,0.5), "cm"), legend.text=element_text(size=11,lineheight = 1), legend.key.height=unit(1,"cm"), legend.title=element_text(size=12), axis.title=element_blank(), axis.text.y=element_blank(), axis.text.x=element_blank(), axis.title.y=element_blank(), axis.ticks.y=element_blank())
+pie 
+
+@
+
+The tables \ref{tab:\Sexpr{label1}} - \ref{tab:\Sexpr{label2}} provide information of the five most abundant species per superkingdom and the families they belong to accompanied by the respective read counts and the NCBI taxonomy database IDs of superkingdom (SkTax), family (FamTax), and species (Tax). For further details of the assignments, please refer to table \ref{tab:compactresults}.
+
+<<The_most_common_Species,echo=F,comment="",warning=FALSE,message=FALSE,results='asis',tidy=T>>=
+
+uniqueSkTax <- unique(TaxIDs$SkTax)
+
+for(i in uniqueSkTax){
+	head <- TaxIDs[which(TaxIDs$SkTax==i),1:6]
+	head <- head[order(head$counts,decreasing = T),]
+	if(nrow(head) > 5) 
+	{
+		head <- head[1:5,]
+	} 
+	for(j in 1:nrow(head))
+	{
+		head$Family[j] <- FamTaxNames[,2][FamTaxNames[,1] == head$FamTax[j]]
+	}
+	head$Family[is.na(head$Family)] <- "Unknown"
+	n<-which(SkTaxNames[,1]==i)
+	caption <- as.character(paste("Read assignments to the superkingdom ",SkTaxNames[n,2],".",sep=""))
+	table <- xtable(head,caption=caption,label = paste("tab:",SkTaxNames[n,2],sep=""))
+	align(table) <- c( "l", ">{\\itshape}p{1.25in} |", ">{\\itshape}p{2.5in}||", rep("c", 3),"|c")
+	print(table,include.rownames=FALSE,size="normalsize",caption.placement="top",tabular.environment="tabular")
+
+}
+
+@
+
+<<Family_TaxID, echo=F,comment="",warning=FALSE,message=FALSE,fig.height=15,fig.width=15,fig.align='center',fig.cap='Graphical representation of read counts for the 100 most abundant families. In order to represent all detected superkingdoms, the displayed families are selected from the complete result applying the HighestAverages algorithm from the R package SciencesPo. Families are sorted alphabetically, color-coded according to superkingdoms. Note that the graph is in log-scale.', crop = TRUE, fig.pos='H'>>=
+
+result_fam <- TaxIDs[, c(3,4,6)]
+result_fam$log.counts <- log(result_fam$counts)
+result_fam$Superkingdom <- 0
+for( i in 1:nrow(SkTaxNames)){
+	n <- which(result_fam$SkTax==SkTaxNames[i,1])
+	
+	result_fam$Superkingdom[n] <- SkTaxNames[i,2]
+	
+}
+result_fam$Family <- 0
+for(i in 1:nrow(result_fam)){
+	if(is.na(result_fam$FamTax[i])==TRUE){
+		result_fam$Family[i] <- as.character("NA")
+	}else{
+		result_fam$Family[i] <- FamTaxNames$V2[which(FamTaxNames$V1 == result_fam$FamTax[i])]
+	}
+}
+uniqueFamTax <- length(unique(result_fam$FamTax))
+
+counts <- data.frame(FamTax=unique(result_fam$FamTax),Family=unique(result_fam$Family))
+counts$counts <- 0
+counts$Superkingdom <- 0
+counts <- na.omit(counts)
+j=1
+for(i in counts$Family){
+	
+	counts$counts[j] <- sum(result_fam$counts[which(result_fam$Family==i)])
+	counts$Superkingdom[j] <- result_fam$Superkingdom[which(result_fam$Family==i)[1]]
+	j=j+1
+}
+
+fam_SK <- c("Virus"=nrow(unique(counts[ counts$Superkingdom == "Virus",])),
+                "Archaea"=nrow(unique(counts[ counts$Superkingdom == "Archaea",])),
+                "Bacteria"=nrow(unique(counts[ counts$Superkingdom == "Bacteria",])),
+                "Eukaryote"=nrow(unique(counts[ counts$Superkingdom == "Eukaryote",])),
+                "Viroid"=nrow(unique(counts[ counts$Superkingdom == "Viroid",])))
+
+x<-capture.output(seats_fam <-  HighestAverages(parties=names(fam_SK), votes=fam_SK, seats=100, method="ad", threshold=0))
+Names <- unique(counts$Superkingdom)
+
+subset <- NULL
+for(i in 1:length(Names))
+{
+  data <- counts[ counts$Superkingdom == Names[i],]
+  data <- data[order(data$counts, decreasing=T),]
+  num_seats <- seats_fam$Seats[ seats_fam$Party == Names[i]]
+  if(num_seats > nrow(data))
+  {
+    num_seats <- nrow(data)
+  }
+  data <- data[1:num_seats,]
+  subset <- rbind(subset, data)
+}
+
+counts <- subset
+
+counts$FamTax <- as.factor(counts$FamTax)
+counts$log.counts <- log(counts$counts)
+counts <- counts[order(counts$Family),]
+
+bp <- ggplot(counts,aes(x=Family,y=log.counts,fill=Superkingdom)) +geom_bar(stat = "identity") + theme(axis.text.x=element_text(size = 10,face = "bold",angle=90))
+pie <- bp + coord_polar(start=0)
+
+value <- rep(1/length(counts$Family),length(counts$Family))
+angles <- 360/(2*pi)* rev(pi/2 + seq( pi/length(counts$Family), 2*pi-pi/length(counts$Family), len=length(counts$Family)))
+v2 <- v1 <- angles[angles > 270]
+v2 <- v2[order(v2)]
+v2 <- v2*-1
+vmiddle <- angles[angles == 270]
+angles <- c(v1, vmiddle, v2)
+
+
+labels <- sort(counts$Family)
+nudges_y <- max(counts$log.counts)
+Sk <- SkTaxNames[which(SkTaxNames$Names %in% counts$Superkingdom),1]
+pie + scale_fill_manual(values = colour[which(colour$SkTax %in% Sk),2]) + theme(plot.margin = unit(c(0,0,0,0), "cm"),legend.text=element_text(size=13,lineheight = 1), 
+legend.key.height=unit(1,"cm"), legend.title=element_text(size=14), axis.title=element_text(size=16), 
+axis.text.y=element_text(size=15,face = "bold"), axis.text.x=element_blank(), axis.ticks.y=element_blank()) +
+ geom_text(aes(y = value/2 + c(0, cumsum(value)[-length(value)]), label = labels),
+            size=5,nudge_y = nudges_y,angle=angles)
+
+@
+
+\newpage
+
+<<Species_TaxID, echo=F,comment="",warning=FALSE,message=FALSE,fig.height=15,fig.width=15,fig.align='center', fig.cap='Graphical representation of read counts for the 80 most abundant species. In order to represent all detected superkingdoms, the displayed species are selected from the complete result applying the HighestAverages algorithm from the R package SciencesPo. Species are sorted alphabetically, color-coded according to superkingdoms. Note that the graph is in log-scale.', crop = TRUE, fig.pos='H'>>=
+
+result_tax <- TaxIDs[,c(3,2,6)]
+result_tax$log.counts <- log(result_tax$counts)
+result_tax$Superkingdom <- 0
+for( i in 1:nrow(SkTaxNames)){
+	n <- which(result_tax$SkTax==SkTaxNames[i,1])
+	
+	result_tax$Superkingdom[n] <- SkTaxNames[i,2]
+	
+}
+
+species_SK <- c("Virus"=nrow(unique(result_tax[ result_tax$Superkingdom == "Virus",])),
+                "Archaea"=nrow(unique(result_tax[ result_tax$Superkingdom == "Archaea",])),
+                "Bacteria"=nrow(unique(result_tax[ result_tax$Superkingdom == "Bacteria",])),
+                "Eukaryote"=nrow(unique(result_tax[ result_tax$Superkingdom == "Eukaryote",])),
+                "Viroid"=nrow(unique(result_tax[ result_tax$Superkingdom == "Viroid",])))
+
+x<-capture.output(seats <- HighestAverages(parties=names(species_SK), votes=species_SK, seats=80, method="ad", threshold=0))
+Names <- unique(result_tax$Superkingdom)
+
+subset <- NULL
+for(i in 1:length(Names))
+{
+  data <- result_tax[ result_tax$Superkingdom == Names[i],]
+  data <- data[order(data$counts, decreasing=T),]
+  num_seats <- seats$Seats[ seats$Party == Names[i]]
+  data <- data[1:num_seats,]
+  subset <- rbind(subset, data)
+}
+
+result_tax <- na.omit(subset)
+
+result_tax$Superkingdom <- as.factor(result_tax$Superkingdom)
+result_tax$Species <- as.factor(result_tax$Species)
+result_tax$SkTax <- as.factor(result_tax$SkTax)
+result_tax <- result_tax[order(result_tax$Species),]
+
+bp <- ggplot(result_tax,aes(x=Species,y=log.counts,fill=Superkingdom)) +geom_bar(stat = "identity") + theme(axis.text.x=element_text(size = 10,face = "bold",angle=90))
+pie <- bp + coord_polar(start=0)
+
+value <- rep(1/length(result_tax$Species),length(result_tax$Species))
+angles <- 360/(2*pi)* rev(pi/2 + seq( pi/nrow(result_tax), 2*pi-pi/nrow(result_tax), len=nrow(result_tax)))
+v2 <- v1 <- angles[angles > 270]
+v2 <- v2[order(v2)]
+v2 <- v2*-1
+vmiddle <- angles[angles == 270]
+angles <- c(v1, vmiddle, v2)
+
+Sk <- SkTaxNames[which(SkTaxNames$Names %in% result_tax$Superkingdom),1]
+pie +scale_fill_manual(values = colour[which(colour$SkTax %in% Sk),2]) + theme(plot.margin = unit(c(0.5,0.5,0.5,0.5), "cm"),legend.text=element_text(size=13,lineheight = 1),legend.key.height=unit(1,"cm"),legend.title=element_text(size=14),axis.title=element_text(size=16),axis.text.y=element_text(size=13,face = "bold"),axis.text.x=element_blank(), axis.ticks.y=element_blank()) + geom_text(aes(y = value/2 + c(0, cumsum(value)[-length(value)]), label = result_tax$Species),size=5,nudge_y = max(result_tax$log.counts),angle=angles)
+
+@
+\newpage
+\newpage
+\subsection*{Part 2: Further Analysis}
+
+<<Superkingdom_TaxID_pep, echo=F,comment="",warning=FALSE,message=FALSE,fig.height=6.5,fig.width=6.5,fig.align='center', fig.cap='Pie chart of percentages of the reads classified into superkingdoms. In the legend, the absolute number of reads classified into the respective taxa is given.', fig.pos='H', crop = TRUE>>=
+
+result_sk <- Further[,c(3,6)]
+further_sk <- unique(Further$SkTax)
+result_sk$Superkingdom <- 0
+for( i in 1:nrow(SkTaxNames)){
+	n <- which(result_sk$SkTax==SkTaxNames[i,1])
+	
+	result_sk$Superkingdom[n] <- SkTaxNames[i,2]
+	
+}
+
+counts <- data.frame(SkTax= unique(result_sk$SkTax),Superkingdom=unique(result_sk$Superkingdom))
+counts$counts <- 0
+j=1
+for(i in counts$SkTax){
+	
+	counts$counts[j] <- c(sum(result_sk$counts[which(result_sk$SkTax==i)]))
+	j<-j+1
+	
+}
+values <- counts[,3]
+
+counts$labels <- paste(counts$Superkingdom," (n = ",counts$counts,")",sep="")
+
+bp <- ggplot(counts,aes(x="",y=counts,fill=labels)) +geom_bar(width=1,stat="identity")
+pie <- bp + coord_polar("y",start=90)
+pie <- pie + scale_fill_manual(values = colour[which(colour$SkTax %in% further_sk),2]) + labs(fill="Superkingdom") + theme(plot.margin = unit(c(0.5,0.5,0.5,0.5), "cm"), legend.text=element_text(size=11,lineheight = 1), legend.key.height=unit(1,"cm"), legend.title=element_text(size=12), axis.title=element_blank(), axis.text.y=element_blank(), axis.text.x=element_blank(), axis.title.y=element_blank(), axis.ticks.y=element_blank())
+pie 
+
+@
+The table \ref{tab:common_species_pep} provide information of the most abundant species and the families they belong to accompanied by the respective read counts and the NCBI taxonomy database IDs of superkingdom (SkTax), family (FamTax), and species (Tax). For further details of the assignments, please refer to table \ref{tab:compactresults_pep}.
+<<The_most_common_Species_pep,echo=F,comment="",warning=FALSE,message=FALSE,results='asis',tidy=T>>=
+
+uniqueSkTax <- unique(Further$SkTax)
+
+	head <- Further[order(Further$counts,decreasing = T),]
+	head <- head[,1:6]
+	if(nrow(head) > 10) 
+	{
+		head <- head[1:10,]
+	} 
+    
+    for(i in 1:nrow(head))
+    {
+        famname <- FamTaxNamesPep[grep(head[i,4],FamTaxNamesPep[,1]),2]
+        head[i,1] <- famname
+    }
+    
+	caption <- as.character(paste("The most abundant species found by further analysis",".",sep=""))
+	table <- xtable(head,caption=caption,label = paste("tab:common_species_pep"))
+	align(table) <- c( "l", ">{\\itshape}p{1.25in} |", ">{\\itshape}p{2.5in}||", rep("c", 3),"|c")
+	print(table,include.rownames=FALSE,size="normalsize",caption.placement="top",tabular.environment="longtable")
+
+@
+
+<<Species_TaxID_pep, echo=F,comment="",warning=FALSE,message=FALSE,fig.height=15,fig.width=15,fig.align='center', fig.cap='Graphical representation of read counts for the most abundant species. In order to represent all detected superkingdoms, the displayed species are selected from the complete result applying the HighestAverages algorithm from the R package SciencesPo. Species are sorted alphabetically, color-coded according to superkingdoms. Note that the graph is in log-scale.', crop = TRUE, fig.pos='H'>>=
+
+result_tax <- Further[,c(3,2,6)]
+result_tax$log.counts <- log(result_tax$counts)
+result_tax$Superkingdom <- 0
+for( i in 1:nrow(SkTaxNames)){
+	n <- which(result_tax$SkTax==SkTaxNames[i,1])
+	
+	result_tax$Superkingdom[n] <- SkTaxNames[i,2]
+	
+}
+
+species_SK <- c("Virus"=nrow(unique(result_tax[ result_tax$Superkingdom == "Virus",])),
+                "Archaea"=nrow(unique(result_tax[ result_tax$Superkingdom == "Archaea",])),
+                "Bacteria"=nrow(unique(result_tax[ result_tax$Superkingdom == "Bacteria",])),
+                "Eukaryote"=nrow(unique(result_tax[ result_tax$Superkingdom == "Eukaryote",])),
+                "Viroid"=nrow(unique(result_tax[ result_tax$Superkingdom == "Viroid",])))
+
+x<-capture.output(seats <- HighestAverages(parties=names(species_SK), votes=species_SK, seats=80, method="ad", threshold=0))
+Names <- unique(result_tax$Superkingdom)
+
+subset <- NULL
+for(i in 1:length(Names))
+{
+  data <- result_tax[ result_tax$Superkingdom == Names[i],]
+  data <- data[order(data$counts, decreasing=T),]
+  num_seats <- seats$Seats[ seats$Party == Names[i]]
+  data <- data[1:num_seats,]
+  subset <- rbind(subset, data)
+}
+
+result_tax <- na.omit(subset)
+
+result_tax$Superkingdom <- as.factor(result_tax$Superkingdom)
+result_tax$Species <- as.factor(result_tax$Species)
+result_tax$SkTax <- as.factor(result_tax$SkTax)
+result_tax <- result_tax[order(result_tax$Species),]
+
+bp <- ggplot(result_tax,aes(x=Species,y=counts,fill=Superkingdom)) +geom_bar(stat = "identity") + theme(axis.text.x=element_text(size = 10,face = "bold",angle=90))
+pie <- bp + coord_polar(start=0)
+
+value <- rep(1/length(result_tax$Species),length(result_tax$Species))
+angles <- 360/(2*pi)* rev(pi/2 + seq( pi/nrow(result_tax), 2*pi-pi/nrow(result_tax), len=nrow(result_tax)))
+v2 <- v1 <- angles[angles > 270]
+v2 <- v2[order(v2)]
+v2 <- v2*-1
+vmiddle <- angles[angles == 270]
+angles <- c(v1, vmiddle, v2)
+
+Sk <- SkTaxNames[which(SkTaxNames$Names %in% result_tax$Superkingdom),1]
+pie +scale_fill_manual(values = colour[which(colour$SkTax %in% Sk),2]) + theme(plot.margin = unit(c(0.5,0.5,0.5,0.5), "cm"),legend.text=element_text(size=13,lineheight = 1),legend.key.height=unit(1,"cm"),legend.title=element_text(size=14),axis.title=element_text(size=16),axis.text.y=element_text(size=13,face = "bold"),axis.text.x=element_blank(), axis.ticks.y=element_blank()) + geom_text(aes(y = value/2 + c(0, cumsum(value)[-length(value)]), label = result_tax$Species),size=5,nudge_y = max(result_tax$counts),angle=angles)
+
+@
+
+\newpage
+%\newgeometry{left=1cm,right=1cm,bottom=1cm,top=1cm} % vielleicht ist es mit einer neueren version von geometry möglich dieses zu nutzen
+\begin{landscape}
+\section{Complete summary of all classifications}
+This section provides you with a summary of all taxonomic assignments of all analyses. Table \ref{tab:compactresults} summarises the results of the basic analysis, table \ref{tab:compactresults_pep} those of the further analysis.
+<<resultprotocol_compact,echo=F,results='asis',warnings=F,message=FALSE,tidy=T>>= 
+
+coln <- colnames(TaxIDs)
+coln <- gsub("_"," ",coln)
+coln <- gsub("[.]", " ",coln)
+colnames(TaxIDs) <- coln
+caption <- as.character(c("Summary of all taxonomic assignments of the basic analysis. The table is structured by taxonomic levels, starting with viruses, followed by bacteria and eukaryotes. In case no reads were classified into a superkingdom, the respective section is missing from the table. For all detected species, the scientific names as recorded in the NCBI taxonomy database and their classification into families is represented. The respective IDs from the NCBI taxonomy database are displayed (SkTax, superkingdom taxonomy ID; FamTax, family taxonomy ID; Tax, species taxonomy ID). If taxonomy IDs are missing, the respective species has not yet been fully classified. The total number of reads classified into the species is given in column ``counts''. In addition, the numbers of reads classified in the different analysis steps is provided. Note that the minimum identities of query and subject sequence in pre-screening and mapping is $97\\%$, in mapping2 $90\\%$. For all steps assigning sequences by BLAST algorithms, the range of sequence identities is provided next to the read counts.","Summary of all taxonomic assignments of the basic analysis."))
+table <- xtable(TaxIDs,caption=caption,label = paste("tab:compactresults"))
+align(table) <- c( "l",">{\\itshape}p{1.25in} | >{\\itshape}p{1.25in}||", rep("c", 3),"|c|", "c",rep("c",3), rep("c",ncol(TaxIDs)-9 ) )
+
+positions <- list(-1)
+j=2
+for(i in unique(TaxIDs[,3])){
+        if(i==11239){
+        }else{
+                positions[[j]] <- which(TaxIDs$SkTax == i)[1]-1
+                j=j+1
+        }
+}
+
+longtable.header <- "\\toprule\\\\"
+for(i in 1:(ncol(TaxIDs)-1)){
+	
+	longtable.header <- paste(longtable.header,"{\\rotatebox{90}{\\parbox[t]{2cm}{\\raggedright\\textbf{",colnames(TaxIDs)[i]," }}}} &",collapse = "")
+	
+}
+longtable.header <- paste(longtable.header,"{\\rotatebox{90}{\\parbox[t]{2cm}{\\raggedright\\textbf{",colnames(TaxIDs)[ncol(TaxIDs)]," }}}}  \\\\ \\midrule \\endfirsthead \\bottomrule",longtable.header,"{\\rotatebox{90}{\\parbox[t]{2cm}{\\raggedright\\textbf{",colnames(TaxIDs)[ncol(TaxIDs)]," }}}}  \\\\ \\midrule \\endhead \\bottomrule")
+longtable.header <- gsub("_|[.]"," ",longtable.header)
+
+print(table, include.rownames=FALSE, include.colnames=F, size="scriptsize",caption.placement="top",tabular.environment="longtable",floating=F, add.to.row = list(pos = positions, command = c(longtable.header,rep("\\hline \\hline \\\\",length(positions)-1))), hline.after=NULL)
+
+@ 
+
+\newpage
+%\newgeometry{left=1cm,right=1cm,bottom=1cm,top=1cm} % vielleicht ist es mit einer neueren version von geometry möglich dieses zu nutzen
+<<resultprotocol_compact_pep,echo=F,results='asis',warnings=F,message=FALSE,tidy=T>>= 
+
+coln <- colnames(Further)
+coln <- gsub("_"," ",coln)
+coln <- gsub("[.]", " ",coln)
+colnames(Further) <- coln
+caption <- as.character(c("Summary of all taxonomic assignments of the further analysis. The table is structured by taxonomic levels, starting with viruses, followed by bacteria and eukaryotes. In case no reads were classified into a superkingdom, the respective section is missing from the table. For all detected species, the scientific names as recorded in the NCBI taxonomy database and their classification into families is represented. The respective IDs from the NCBI taxonomy database are displayed (SkTax, superkingdom taxonomy ID; FamTax, family taxonomy ID; Tax, species taxonomy ID). If taxonomy IDs are missing, the respective species has not yet been fully classified. The total number of reads classified into the species is given in column ``counts''. In addition, the numbers of reads classified in the different analysis steps is provided. For all assignments, the range of sequence identities is provided next to the read counts.","Summary of all taxonomic assignments of the further analysis."))
+table <- xtable(Further,caption=caption, label=paste("tab:compactresults_pep"))
+align(table) <- c( "l",">{\\itshape}p{1.25in} | >{\\itshape}p{1.25in}||", rep("c", 3),"|c|", rep("c",ncol(Further)-5) )
+
+positions <- list(-1)
+j=2
+for(i in unique(Further[,3])){
+        if(i==11239){
+        }else{
+                positions[[j]] <- which(Further$SkTax == i)[1]-1
+                j=j+1
+        }
+}
+
+longtable.header <- "\\toprule\\\\"
+for(i in 1:(ncol(Further)-1)){
+	
+	longtable.header <- paste(longtable.header,"{\\rotatebox{90}{\\parbox[t]{2cm}{\\raggedright\\textbf{",colnames(Further)[i]," }}}} &",collapse = "")
+	
+}
+longtable.header <- paste(longtable.header,"{\\rotatebox{90}{\\parbox[t]{2cm}{\\raggedright\\textbf{",colnames(Further)[ncol(Further)]," }}}}  \\\\ \\midrule \\endfirsthead \\bottomrule",longtable.header,"{\\rotatebox{90}{\\parbox[t]{2cm}{\\raggedright\\textbf{",colnames(Further)[ncol(Further)]," }}}}  \\\\ \\midrule \\endhead \\bottomrule")
+longtable.header <- gsub("_|[.]"," ",longtable.header)
+
+print(table, include.rownames=FALSE, include.colnames=F, size="scriptsize",caption.placement="top",tabular.environment="longtable",floating=F, add.to.row = list(pos = positions, command = c(longtable.header,rep("\\hline \\hline \\\\",length(positions)-1))), hline.after=NULL)
+
+@ 
+
+
+%\restoregeometry
+\end{landscape}
+\end{document}

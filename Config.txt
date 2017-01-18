@@ -1,0 +1,72 @@
+#    Contig.txt - part of RIEMS - Reliable Information Extraction from Metagenomic Sequence datasets
+#    Copyright (C) 2009-2016  Ariane Belka, Maria Jenckel, Matthias Scheuch, Dirk Hoeper
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
+#!/bin/bash
+
+#################################################################### Please adapt ########################################################################
+##########################################################################################################################################################
+
+
+########################################## Software paths
+gsflxdir=path-name/454_3.0/bin/                                     # directory containg all GS FLX applications (e.g. sfffile, runAssembly etc.)
+installdir=path-name/RIEMS/                                         # install directory containing all 'RIEMS' subtools (e.g. TrimSff.sh etc.)
+embossdir=path-name/emboss/bin/                                     # directory containg all Emboss software applications (e.g. sixpack etc.)
+blastdir=path-name/ncbi-blast-2.4.0+/bin/                           # directory containg all BLAST software applications (e.g. blastn, makeblastdb etc.)
+R=/usr/lib64/R/bin/                                                 # path to R
+latexdir=/usr/bin/                                                  # path to Latex
+
+
+########################################## Database paths
+BLASTDB=path-name/ncbi/                                             # path to blastdbs
+export BLASTDB                                                      # export path to blastdbs
+ntdb=nt                                                             # BLAST nucleotide database
+protdb=nr                                                           # BLAST non redundant database
+taxdir=path-name/taxonomy                                           # directory containing BLAST '.dmp' files (e.g. names.dmp, gi_taxid_nucl.dmp etc.)
+fasttaxid=path-name/taxLok                                          # directory containing viral database (automatically created after each BLAST db update)
+fasttaxidntdb=$fasttaxid/gi_taxid_nucl/gi_taxid_nucl                # database for fast nucl gi -> taxid assignment | (automatically created 
+fasttaxidprotdb=$fasttaxid/gi_taxid_prot/gi_taxid_prot              # database for fast prot gi -> taxid assignment V after each BLAST db update)
+refseqdir=$installdir/RefSequenzen                                  # optional: directory containing downloaded references during analyses
+
+
+########################################## Variables
+threads=`grep -c ^processor /proc/cpuinfo`                          # number of CPU threads 'RIEMS' may use (the more, the faster!)
+((threadsSplit=threads-1))                                          # number of files created during several steps within RIEMS
+((threadsMap=threads/2-1))              
+((threadsMax=100))                                                  # max number of files created in several steps within RIEMS (also restricted by suffixes/prefexes)
+evalue=0.001                                                        # E-value limit for all BLAST analyses
+LC_NUMERIC=C        
+cutoffAssembly=250000                                               # cut-off unclassified reads for Assembley
+cutoffRndReads=200000                                               # cut-off unclassified reads for blast of random reads
+Rrespository=https://cran.uni-muenster.de/                          # set respository for R-packages
+export Rrespository                                                 # export respository for R-packages
+
+
+########################################## Scripts
+scriptR=${installdir}/resultprotocol.R                              # path to R script for result tables
+scriptT=${installdir}/resultprotocol.Rnw                            # path to Rnw file for result report
+scriptBlastp=${installdir}/Blastp.R                                 # path to R script for Blastp results
+scriptFurther=${installdir}/resultprotocol_further.R                # path to R script for result tables
+scriptTFurther=${installdir}/resultprotocol_further.Rnw             # path to Rnw script for result report
+
+
+
+########################################## Files
+referenz_trimming=${installdir}/dummy.fna                           # path to dummy-reference
+il_adapter=${installdir}/illuminaAdapterTrimmingDB.fna              # path to illumina adapter sequences
+it_adapter=${installdir}/dummy.fna                                  # path to ion torrent adapter sequences
+
+
