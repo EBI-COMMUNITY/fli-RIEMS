@@ -1,0 +1,179 @@
+#!/bin/bash
+#
+# ---------------------------------------------------------------------
+# GS Run Browser Application Start Script for Linux
+# ---------------------------------------------------------------------
+#
+
+# ---------------------------------------------------------------------
+# Ensure the APP_HOME var for this script points to the
+# home directory where application software is installed on your system.
+# ---------------------------------------------------------------------
+SCRIPT_PATH=`readlink -f "$0"`
+RELATIVE_HERE=`dirname "$SCRIPT_PATH"`
+APP_HOME=`dirname "$RELATIVE_HERE"`
+APP_HOME_BIN="$APP_HOME"/bin
+APP_HOME_LIB="$APP_HOME"/lib
+APP_HOME_LIBEXEC="$APP_HOME"/libexec
+APP_HOME_CONFIG="$APP_HOME"/config
+APP_HOME_DOC="$APP_HOME"/doc
+APP_HOME_VIDEO="$APP_HOME"/video
+APP_HOME_CONFIG_FILE="$APP_HOME_CONFIG"/gsRunBrowser.vmoptions
+APP_NAME="GS Run Browser"
+
+# ----------------------------------------------------------------------
+# Default JVM settings when not defined in gsRunBrowser.vmoptions
+# ----------------------------------------------------------------------
+DEFAULT_HEAP_MEM="-Xmx750M"
+DEFAULT_PERM_MEM="-XX:MaxPermSize=128M"
+
+DEFAULT_RPC_PORT=4540
+DEFAULT_ENABLE_FEATURES=
+DEFAULT_REMOTE_X=
+HOME_CONFIG="$APP_HOME_CONFIG"
+ENABLE_FEATURES="$DEFAULT_ENABLE_FEATURES"
+REMOTE_X="$DEFAULT_REMOTE_X"
+
+HEAP_MEM=$(grep "Xmx" $APP_HOME_CONFIG_FILE)
+PER_MEM=$(grep "XX" $APP_HOME_CONFIG_FILE)
+
+if [ -z $HEAP_MEM ]; then HEAP_MEM=$DEFAULT_HEAP_MEM; fi
+if [ -z $PER_MEM ]; then PER_MEM=$DEFAULT_PERM_MEM; fi
+
+usage ()
+{
+    # Note: --enable intentionally not included as part of usage statement.
+    #       --remoteX, beta feature, intentionally not included as part of use statement
+
+    echo "Usage: $APP_HOME [--maxHeap <number>] [--maxPerm <number>] [--configDir <directory>] [dataSet]" >&2
+    echo "        --maxHeap   maximum jvm heap space (MB) (default=${DEFAULT_HEAP_MEM})" >&2
+    echo "        --maxPerm   maximum jvm permgen space (MB) (default=${DEFAULT_PERM_MEM})" >&2
+    echo "        --configDir application configuration directory (default=${APP_HOME_CONFIG})" >&2
+    echo "        dataSet     R_ or D_ directory or the individual cwf files or wells files to browse" >&2
+    exit 100
+}
+
+
+while [ $# -gt 0 ]
+do
+  case "$1" in
+      --maxHeap)
+	  if [ $# -lt 2 ]; then usage; fi
+	  HEAP_MEM_NUM="$2"
+	  shift 2
+          ;;
+      --maxPerm)
+	  if [ $# -lt 2 ]; then usage; fi
+	  PER_MEM_NUM="$2"
+	  shift 2
+	  ;;
+      --configDir)
+	  if [ $# -lt 2 ]; then usage; fi
+	  HOME_CONFIG="$2"
+	  shift 2
+	  ;;
+      --enable)
+	  if [ $# -lt 2 ]; then usage; fi
+	  ENABLE_FEATURES="$2"
+	  shift 2
+	  ;;
+      --remoteX)
+          REMOTE_X=1
+          shift 1
+          ;;
+      *)
+	  break;
+   esac
+done
+
+# Attempt to get the setting for the data manager xml rpc port, else use defaultRpcPort
+if [ ! -z "$GS_XMLPORT" ];
+then
+   RPC_PORT=$GS_XMLPORT
+else
+   if [ -e /var/log/gsRunProcessorManager.port ]; then
+      RPC_PORT=$(cat /var/log/gsRunProcessorManager.port)
+   else
+      RPC_PORT=$DEFAULT_RPC_PORT
+   fi
+fi
+
+# Only accept a number
+echo $HEAP_MEM_NUM | grep "[^0-9]" > /dev/null 2>&1
+if [ "$?" -eq "0" ]; then
+    echo "Value '$HEAP_MEM_NUM' for --maxHeap is not a positive number" >&2
+    usage
+fi
+
+
+# Only accept a number
+echo $PER_MEM_NUM | grep "[^0-9]" > /dev/null 2>&1
+if [ "$?" -eq "0" ]; then
+    echo "Value '$PER_MEM_NUM' for --maxPerm is not a positive number" >&2
+    usage
+fi
+
+# User input overwrite the number.
+if [ ! -z $HEAP_MEM_NUM ]; then HEAP_MEM="-Xmx${HEAP_MEM_NUM}M"; fi
+if [ ! -z $PER_MEM_NUM ]; then PER_MEM="-XX:MaxPermSize=${PER_MEM_NUM}M"; fi
+
+# Only accept a directory
+if [ ! -d "$HOME_CONFIG" ]; then
+    echo "Value '$HOME_CONFIG' for --configDir is not a directory" >&2
+    usage
+fi
+
+# ---------------------------------------------------------------------
+# Before you run the application specify the location of the
+# java runtime base directory which will be used for running
+# ---------------------------------------------------------------------
+if [ -z "$APP_JRE_HOME" ]; then
+  APP_JRE_HOME="$APP_HOME/../jre/jre1.6.0_30/"
+  if [ -z "$APP_JRE_HOME" ]; then
+    echo "ERROR: Cannot start the $APP_NAME application."
+    echo "ERROR: Cannot find $APP_JRE_HOME"
+    echo "The required Java runtime environment was not found for the $APP_NAME. Please reinstall or contact support."
+  fi
+fi
+
+
+# ---------------------------------------------------------------------
+# Classpath settings (in addition to the classpath in one-jar)
+# ---------------------------------------------------------------------
+APP_CLASS_PATH="$APP_CLASS_PATH:$APP_HOME_CONFIG"
+APP_CLASS_PATH="$APP_CLASS_PATH:$APP_HOME_BIN"
+APP_CLASS_PATH="$APP_CLASS_PATH:$APP_HOME_LIBEXEC"
+APP_CLASS_PATH="$APP_CLASS_PATH:$APP_HOME_DOC"
+APP_CLASS_PATH="$APP_CLASS_PATH:$APP_HOME_VIDEO"
+APP_CLASS_PATH="$APP_CLASS_PATH:$APP_HOME/../../bin"
+APP_CLASS_PATH="$APP_CLASS_PATH:$APP_HOME_LIB/browser-3.0.one-jar.jar"
+
+# ---------------------------------------------------------------------
+# Required JVM settings
+# ---------------------------------------------------------------------
+REQUIRED_JVM_ARGS="$REQUIRED_JVM_ARGS ${HEAP_MEM} ${PER_MEM}"
+REQUIRED_JVM_ARGS="$REQUIRED_JVM_ARGS -Dapp.launch.command.path=$SCRIPT_PATH"
+
+# ---------------------------------------------------------------------
+# Additional JVM options can be set in the vmoptions file, we do not need that
+# ---------------------------------------------------------------------
+if [ -z "$APP_VM_OPTIONS" ]; then
+  APP_VM_OPTIONS="$APP_HOME_CONFIG_FILE"
+fi
+
+JVM_ARGS=`sed /-Xmx/d <"$APP_VM_OPTIONS"|sed /-XX/d|tr '\n' ' ' `
+
+JVM_ARGS="$JVM_ARGS $REQUIRED_JVM_ARGS -Dhelp.base.file=$BROWSER_HOME_DOC -DRPC_Port=$RPC_PORT -Dlog4j.configuration=gsrunbrowser.log4j.properties"
+
+if [ "$ENABLE_FEATURES" != "" ]; then
+	JVM_ARGS="$JVM_ARGS -Dcom.fourfivefour.enable=$ENABLE_FEATURES"
+fi
+
+if [ "$REMOTE_X" != "" ]; then
+    JVM_ARGS="$JVM_ARGS -Dsun.java2d.pmoffscreen=false"
+fi
+
+# ---------------------------------------------------------------------
+# Start
+# ---------------------------------------------------------------------
+exec "$APP_JRE_HOME/bin/java" $JVM_ARGS -cp $APP_CLASS_PATH com.simontuffs.onejar.Boot $*

@@ -1,0 +1,684 @@
+#!/bin/bash
+
+############################################################################
+#
+# Copyright (C) 2008-2010 - 454 Life Sciences
+#
+# This script is the command-line launcher for gsRunProcessor.  All other
+# command line scripts (runImagePipe, runAnalysisPipeXXX, runAnalysisFilter)
+# all end up calling this script.
+#
+# There are a few environmental variables that affect launching.  Instead
+# of exiting this file, users should set their environment as this file
+# is upgraded with new software.
+#
+# "GS_LAUNCH_MODE"     - Should be one of "SINGLE", "MULTII", "MPI" or "GSRPM".
+# "GS_NUM_PROCESSORS"  - Maximum number of processors to use to run the job.
+#                        If this is 0 or not set, the script will use all
+#                        available processors.
+# "GS_CACHEDIR"        - The location of a fast disk with lots of space  for 
+#			 temporary storage. Defaults to the output directory 
+#                        if not set.
+# "GS_DIRNAME_FORMAT"  - The D_ name format, minus the two letter "D_" prefix.
+# "GS_MPIARGS"         - Parameters to the mpiexec command for MPI mode.
+# "GS_MPIARGS_COMMAND" - Script that generates mpiexec arguments dynamically.
+#                        Only one of  GS_MPIARGS and GS_MPIARGS_COMMAND should
+#                        be specified.
+# "GS_XML_PORT"        - The port number with which to communicate to the
+#                        gsRunProcessorManager.
+#
+############################################################################
+
+#Override any arguments specified by the --env option
+for arg in "$@"
+do
+  ENV_OVERRIDE="`expr \"$arg\" : '--env=\([a-zA-Z][a-zA-Z0-9_]*=.*\)'`"
+  if [ -n "$ENV_OVERRIDE" ]; then
+  	export ${ENV_OVERRIDE%%=*}="${ENV_OVERRIDE#*=}"
+  fi
+done
+
+# Set the default mode to MPI if not specified.
+if [ -z "$GS_LAUNCH_MODE" ]; then
+   GS_LAUNCH_MODE="MPI"
+fi
+
+# Processing directory name format.  NOTE: There is no need to specify
+# the two letter D_ prefix as that is automatically prepended.  Otherwise,
+# this string is passed through the date command and then shell
+# expanded.
+# 
+# The words below will be replaced with their proper names:
+#  PIPELINE_NAME
+if [ "x$GS_DIRNAME_FORMAT" = "x" ]; then
+   GS_DIRNAME_FORMAT="%Y_%m_%d_%H_%M_%S_`hostname -s`_PIPELINE_NAME"
+fi
+
+
+# GS_NUM_PROCESSORS controls the number of processors used for processing.
+if [ -z "$GS_NUM_PROCESSORS" -o "$GS_NUM_PROCESSORS" == "0" ]; then
+   GS_NUM_PROCESSORS=`grep -ic "^processor" /proc/cpuinfo`
+fi
+
+
+# If neither GS_MPIARGS_COMMAND nor GS_MPIARGS are set, set a default number of processes.
+if [ -z "$GS_MPIARGS_COMMAND" -a -z "$GS_MPIARGS" ]; then
+   if [ -n "$NSLOTS" -a -n "$SGE_ROOT" -a -n "$SGE_TASK_ID" ] ; then
+      GS_MPIARGS="-np $NSLOTS"
+   else
+      GS_MPIARGS="-np $GS_NUM_PROCESSORS"
+   fi
+fi
+
+
+# Set this if the pipelines are not in the standard locations or you need
+# to use a non-standard set of pipelines.
+#GS_PIPELINES_PATH=
+
+# Set this if the quality score tables are not installed in the standard
+# locations or you wish to use a different set of quality score tables.
+# (not recommended).
+#GS_PHRED_TABLES_PATH=
+
+############################################################################
+#
+# No user configurable settings below
+#
+############################################################################
+
+
+showHelp()
+{
+	echo 
+	echo Usage: $(basename $0) [OPTIONS] --pipe=PIPELINE.xml SOURCE_DIRECTORY
+	echo
+cat <<MOREHELP
+
+This application processes data from a 454/Roche instrument.
+ 
+Specifically, $0 is a wrapper script for gsRunProcessor.
+It creates the output directories, prepares the 
+run for processing and calls the appropriate launching commands.
+
+See the site preparation guide for details on configuring 
+startGsProcessor for your environment.
+
+Call 'gsRunProcessor --help' for information on additional
+arguments that can be passed to the gsRunProcessor.
+MOREHELP
+}
+
+
+# Prevent this script from being launched directly with mpiexec.
+INVALID_PROCESSES="orted mpiexec"
+
+pProcess="$(basename $(readlink -f /proc/$PPID/exe))"
+
+for iProcess in $INVALID_PROCESSES
+do
+   if [ "$iProcess" == "$pProcess" ] ; then
+      showMsg=0
+      
+      if [ -n "$OMPI_MCA_ns_nds_vpid" ] ; then
+         # Versions prior to 1.3.
+         if [ "$OMPI_MCA_ns_nds_vpid" == "0" ] ; then
+            showMsg=1
+         fi
+      elif [ -n "$OMPI_COMM_WORLD_RANK" ] ; then
+         # Versions 1.3 and up.
+         if [ "$OMPI_COMM_WORLD_RANK" == "0" ] ; then
+            showMsg=1
+         fi
+      else
+         showMsg=1
+      fi
+      
+      if [ $showMsg -eq 1 ] ; then
+         echo
+         echo "ERROR: Launching $0 with mpiexec will produce erroneous results."
+         showHelp
+      fi
+      
+      exit 1
+   fi
+done
+
+
+
+if [ -z "$1" ] ; then
+   showHelp
+   exit 1
+fi
+
+
+OUTDIR=""
+EXTRA_PARAMS=""
+VERBOSE_OPTION=""
+GSRP_ENV=""
+QUIET=0
+PREP_ONLY=0
+ON_THE_FLY=0
+DISPLAY_VERSION=0
+FILTER_ONLY=0
+
+# Parse the command line.
+while [ $# -gt 0 ]
+do
+   case "$1" in
+      -p*)
+         PIPELINE_NAME="${1:2}"
+         ARGS=$ARGS"$1 "
+         ;;
+         
+      --pipe=*)
+         PIPELINE_NAME=${1:7}
+         ARGS=$ARGS"$1 "
+         ;;
+         
+      --prep)
+         PREP_ONLY=1
+         GS_LAUNCH_MODE=SINGLE
+         ;;
+         
+      --otf)
+         ON_THE_FLY=1
+         ARGS=$ARGS"$1 "
+         ;;
+         
+      --reg=*)
+         REGION_RANGE=${1:6}
+         ARGS=$ARGS"$1 "
+         ;;
+         
+      -h)
+         showHelp
+         exit 0
+         ;;
+         
+      --help)
+         showHelp
+         exit 0
+         ;;
+         
+      -q)
+         QUIET=1
+         ARGS=$ARGS"$1 "
+         ;;
+         
+      --quiet)
+         QUIET=1
+         ARGS=$ARGS"$1 "
+         ;;
+         
+      -V)
+         DISPLAY_VERSION=1
+         ;;
+         
+      --version)
+         DISPLAY_VERSION=1
+         ;;
+         
+      --verbose)
+         if [ x$VERBOSE_OPTION = x ]; then
+            VERBOSE_OPTION="--verbose "
+         else
+            VERBOSE_OPTION="--vverbose "
+         fi
+         ARGS=$ARGS"$1 "
+         ;;
+         
+      -o*)
+         OUTDIR="${1:2}"
+         ;;
+         
+      --out=*)
+         OUTDIR="${1:6}"
+         ;;
+       
+       --env=*)
+if [ x"$GSRP_ENV" = x ]; then
+ GSRP_ENV=$1
+else
+ GSRP_ENV=$GSRP_ENV" $1"
+fi
+      	 # Eat --env, they were taken care of before
+         ;;
+         
+      --filterOnly)
+         FILTER_ONLY=1
+         ;;
+         
+      -*)
+         ARGS=$ARGS"$1 "
+         ;;
+         
+      *)
+         SOURCE_DIR=$1
+         ;;
+   esac
+   shift
+done
+
+# If SINGLE mode is requested, launch mpiexec with only 1 core.
+if [ "$GS_LAUNCH_MODE" = "SINGLE" ] ; then
+   GS_MPIARGS="-np 1 -host localhost"
+   unset GS_MPIARGS_COMMAND
+fi
+
+
+case $GS_LAUNCH_MODE in
+   
+   "SINGLE"|"MPI"|"MULTI")
+      
+      # Get the path to the gsRunProcessor executable we're going to use.
+      if [ -e $(dirname $BASH_SOURCE)/gsRunProcessor ]; then
+         REAL_GSRUNPROCESSOR_BIN="$(readlink -f $(dirname $BASH_SOURCE)/gsRunProcessor 2>/dev/null)"
+      else
+         REAL_GSRUNPROCESSOR_BIN="$(readlink -f $(which gsRunProcessor 2>/dev/null) 2>/dev/null)"
+      fi
+      
+      if [ -z "$REAL_GSRUNPROCESSOR_BIN" -o ! -x "$REAL_GSRUNPROCESSOR_BIN" ]; then
+         echo "ERROR: No gsRunProcessor was found.  Please ensure that gsRunProcessor is in your PATH."
+         exit 1
+      fi
+      
+      # Display the version if requested.
+      if [ $DISPLAY_VERSION -eq 1 ] ; then
+         $REAL_GSRUNPROCESSOR_BIN --version
+         exit 0
+      fi
+      
+      REAL_GSRUNPROCESSOR_DIR=`dirname $REAL_GSRUNPROCESSOR_BIN`
+      
+      
+      # Get the path to the orterun executable we're going to use.
+      OPAL_PREFIX="`readlink -f $REAL_GSRUNPROCESSOR_DIR/../libexec/gsRunProcessor/openmpi`"
+      ORTERUN="$OPAL_PREFIX/bin/orterun"
+      
+      if [ ! -d "$OPAL_PREFIX" -o ! -x "$ORTERUN" ] ; then
+         echo "ERROR: The GS_LAUNCH_MODE in startGsProcessor is set to \"$GS_LAUNCH_MODE\", but the orterun"
+         echo "program could not be found.  If you really wish to use \"$GS_LAUNCH_MODE\", then"
+         echo "check your installation.  Otherwise, set the GS_LAUNCH_MODE in"
+         echo "your environment to 'GSRPM'."
+         exit 1
+      fi
+      
+      
+      # Check the GS_MPIARGS variables.
+      if [ -n "$GS_MPIARGS_COMMAND" ]; then
+         if [ -n "$GS_MPIARGS" ]; then
+            echo "WARNING: Both the 'GS_MPIARGS_COMMAND' and the 'GS_MPIARGS'"
+            echo " environmental variable are set. The value of GS_MPIARGS will "
+            echo " be overridden by the results of 'GS_MPIARGS_COMMAND'.  Please remove "
+            echo " one or the other from the user's environment to remove this warning."
+         fi
+         GS_MPIARGS=$(eval $GS_MPIARGS_COMMAND)
+      fi
+      
+      COMMAND_PREFIX="OPAL_PREFIX=$OPAL_PREFIX exec $ORTERUN $GS_MPIARGS"
+
+      # Check if valgrind env var is defined and
+      # set up ORTE to run with "valgrind" option
+      if [ ${#VALGRIND_OMPI} -ne 0 ]; then
+          COMMAND_PREFIX="OPAL_PREFIX=$OPAL_PREFIX exec $ORTERUN $GS_MPIARGS valgrind $VALGRIND_OMPI"
+          echo "Runnning ORTE with 'valgrind $VALGRIND_OMPI'"
+      fi
+
+
+      ADDITIONAL_CMDS=""
+      ;;
+      
+      
+   "GSRPM")
+      if [ "x$GS_XML_PORT" = "x" ]; then
+         if [ -e /var/run/gsRunProcessorManager.port ]; then
+            GS_XML_PORT=`cat /var/run/gsRunProcessorManager.port`
+         elif [ -e "$RIGDIR/runTime/gsRunProcessorManager.port" ]; then
+            GS_XML_PORT=`cat "$RIGDIR/runTime/gsRunProcessorManager.port"`
+         else
+            GS_XML_PORT=4540
+         fi
+      fi
+      
+      # Display the version if requested.
+      if [ $DISPLAY_VERSION -eq 1 ] ; then
+         gsRunProcessorManagerCtrl queryVersion
+         exit 0
+      fi
+      
+      COMMAND_PREFIX=""
+      ADDITIONAL_CMDS=""
+      ;;
+      
+      
+   *)
+      echo
+      echo "ERROR: The launch mode \"$GS_LAUNCH_MODE\" is unrecognized. "
+      echo "Check the value of the GS_LAUNCH_MODE environmental variable."
+      echo "Valid values are \"SINGLE\", \"GSRPM\", and \"MPI\"."
+      echo
+      exit 1
+      ;;
+      
+esac
+
+
+# Verify the required data was passed to the script.
+if [ ${#PIPELINE_NAME} -eq 0 ]; then
+   echo "You must specify a processing script."
+   showHelp
+   exit 1
+fi
+
+if [ ${#REGION_RANGE} -eq 0 ]; then
+   REGION_RANGE='1-99'
+fi
+ 
+if [ -z "$SOURCE_DIR" ] ; then
+    echo "You must specify a source directory."
+    showHelp
+    exit 1
+fi
+
+
+# If the user specified an output directory, make sure it exists.
+if [ -n "$OUTDIR" ] ; then
+   if [ "$GS_LAUNCH_MODE" = "GSRPM" ] ; then
+      # Specifying -o or --out in GSRPM mode is not supported.
+      echo "Warning: specifying an output directory is not supported"
+      echo "in GSRPM mode.  Option ignored."
+   else
+      if [ ! -d "$OUTDIR" ] ; then
+         mkdir -p "$OUTDIR" 2>/dev/null
+         
+         if [ $? -ne 0 ] ; then
+            echo "Unable to create output directory: $OUTDIR"
+            exit 1
+         fi
+      fi
+      
+      OUTDIR="`readlink -f $OUTDIR`"
+   fi
+fi
+
+
+ABSOLUTE_SOURCE_DIR=$(readlink -f "$SOURCE_DIR")
+if [ -z "$ABSOLUTE_SOURCE_DIR" ]; then
+   echo "Cannot find source directory \"$SOURCE_DIR\"."
+   exit 1
+fi
+SOURCE_DIR="$ABSOLUTE_SOURCE_DIR"
+
+
+# Determine if we are starting from raw images or a D_ directory
+if [ $ON_THE_FLY -eq 1 ] ; then
+   ANALYSIS_TYPE=from_raw
+else
+   if [ -e "$SOURCE_DIR/dataRunParams.parse" -a -e "$SOURCE_DIR/rawImages" -a -e "$SOURCE_DIR/imageLog.parse" ]; then
+      ANALYSIS_TYPE=from_raw 
+   else
+      ANALYSIS_TYPE=cont
+   fi
+fi
+
+# Launch the pipeline.
+DIRNAME_FORMAT=D_${GS_DIRNAME_FORMAT/PIPELINE_NAME/$(basename $PIPELINE_NAME .xml)}
+if [ "$ANALYSIS_TYPE" == "from_raw" ]; then
+   
+   if [ -z "$OUTDIR" ] ; then
+      DIRNAME="$SOURCE_DIR/$(echo $(date +$DIRNAME_FORMAT))"
+   else
+      DIRNAME="$OUTDIR/$(echo $(date +$DIRNAME_FORMAT))"
+   fi
+   
+   if [ $GS_LAUNCH_MODE == "SINGLE" -o $GS_LAUNCH_MODE == "MULTI" -o $GS_LAUNCH_MODE == "MPI" ]; then
+      
+      # Create the directory for the analysis output.
+      mkdir -p "$DIRNAME" 2>/dev/null
+      if [ $? -ne 0 ] ; then
+         echo -n "Unable to create directory: $DIRNAME"
+         if [ ! -w "$DIRNAME" ] ; then
+            echo ": Permission Denied"
+            echo -n "Either change the permissions to allow writing or set --out to a writable directory."
+         fi
+         echo ""
+         exit 1
+      fi
+      
+      if [ $QUIET -eq 0 ]; then
+         echo "Output files will appear in $DIRNAME"
+      fi
+      
+      if [ -e "$SOURCE_DIR/dataRunParams.xml" ]; then
+         cp "$SOURCE_DIR/dataRunParams.xml" "$DIRNAME"
+      fi
+
+      if [ ! -e "$DIRNAME/dataRunParams.xml" -a $ON_THE_FLY -eq 0 ]; then
+         if [ $QUIET -eq 0 ]; then
+            $REAL_GSRUNPROCESSOR_BIN --prep --log="$DIRNAME/gsRunProcessor.log" \
+			  	     --error="$DIRNAME/gsRunProcessor_err.log" \
+                                     --out="$DIRNAME/" "$SOURCE_DIR" 
+         else
+            $REAL_GSRUNPROCESSOR_BIN --prep -q --log="$DIRNAME/gsRunProcessor.log" \
+			  	     --error="$DIRNAME/gsRunProcessor_err.log" \
+                                     --out="$DIRNAME/" "$SOURCE_DIR"
+         fi
+         
+         if [ $? -ne 0 ]; then
+	    rm -f "$DIRNAME"/dataRunParams.xml
+            exit 1
+         fi
+      fi
+
+      if [ $PREP_ONLY -eq 1 ]; then
+	exit 0
+      fi
+      
+      VERBOSITY=""
+      if [ x$VERBOSE_OPTION != x -a x$VERBOSE_OPTION = xverbose ]; then
+         VERBOSITY="--verbose"
+      elif [ x$VERBOSE_OPTION != x -a x$VERBOSE_OPTION = xvverbose ]; then
+         VERBOSITY="--verbose --verbose"
+      fi
+
+      eval $COMMAND_PREFIX $REAL_GSRUNPROCESSOR_BIN  \
+         --run=\"$DIRNAME/dataRunParams.xml\" \
+         --imageLog=\"$SOURCE_DIR/imageLog.parse\" \
+         --images=\"$SOURCE_DIR/rawImages/\" \
+         --out=\"$DIRNAME/regions\" \
+         --log=\"$DIRNAME/gsRunProcessor.log\" \
+         $VERBOSITY \
+         --error=\"$DIRNAME/gsRunProcessor_err.log\" $ARGS
+      
+   elif [ $GS_LAUNCH_MODE="GSRPM" ]; then
+      if [ $QUIET -eq 0 ]; then
+         # Get the version of gsRunProcessor.
+         VERSION_STRING=" [`gsRunProcessorManagerCtrl queryVersion 2>/dev/null | grep -e '^gsRunProcessor '`]"
+         
+         if [ $? -ne 0 ] ; then
+            VERSION_STRING=""
+         fi
+         
+         echo "Launching job with gsRunProcessorManager${VERSION_STRING}. Please wait."
+      fi
+      
+      export GSRP_ENV
+      if [ -e $PIPELINE_NAME ]; then
+         JOBID=$(gsRunProcessorManagerCtrl --port=$GS_XML_PORT -m launch "$(readlink -f $PIPELINE_NAME)" "$SOURCE_DIR" "" $REGION_RANGE $VERBOSE_OPTION $EXTRA_PARAMS)
+         RETVAL=$?
+      else
+         JOBID=$(gsRunProcessorManagerCtrl --port=$GS_XML_PORT -m launch $PIPELINE_NAME "$SOURCE_DIR" "" $REGION_RANGE $VERBOSE_OPTION $EXTRA_PARAMS)
+         RETVAL=$?
+      fi
+      if [ $RETVAL -eq 0 ]; then
+         sleep 3
+         STAT=$(gsRunProcessorManagerCtrl  --port=$GS_XML_PORT -m status $JOBID)
+         OUTDIR=$(gsRunProcessorManagerCtrl --port=$GS_XML_PORT -m outdir $JOBID)
+         OUTDIR=$(dirname "$OUTDIR")
+         if [ $STAT == "RUNNING" ]; then
+            if [ $QUIET -eq 0 ]; then
+               gsRunProcessorManagerCtrl  --port=$GS_XML_PORT status $JOBID 
+               echo
+               echo "You can monitor the status of the job by viewing:"
+               echo " $OUTDIR/gsRunProcessor.log"
+               echo
+               echo "You can stop the job by calling the following command:"
+               echo " gsRunProcessorManagerCtrl abort $JOBID"
+               echo
+            fi
+         elif  [ $STAT == "QUEUED" ]; then
+            if [ $QUIET -eq 0 ]; then
+               echo
+               echo "**Your job is queued for later processing.**"
+               echo
+               gsRunProcessorManagerCtrl --port=$GS_XML_PORT queue
+               echo "After the jobs starts, you can monitor the status of the job by viewing:"
+               echo " $OUTDIR/gsRunProcessor.log"
+               echo
+               echo "You can stop the job by calling the following command:"
+               echo " gsRunProcessorManagerCtrl abort $JOBID"
+               echo
+            fi
+         else
+            gsRunProcessorManagerCtrl  --port=$GS_XML_PORT status $JOBID 
+            echo 
+            echo "There was an error launching your job. View the gsRunProcessorManager"
+            echo "log or the log in $OUTDIR for possible causes."
+            echo
+         fi
+         
+      else 
+         # The error message is printed out and shows up as our JOBID.
+         echo
+         echo $JOBID
+         echo
+         
+         exit $RETVAL
+      fi
+   fi
+   
+else
+   if [ -z "$OUTDIR" ] ; then
+      DIRNAME="$(dirname "$SOURCE_DIR")/$(echo $(date +$DIRNAME_FORMAT))"
+   else
+      DIRNAME="$OUTDIR/$(echo $(date +$DIRNAME_FORMAT))"
+   fi
+   
+   if [ $GS_LAUNCH_MODE == "SINGLE" -o $GS_LAUNCH_MODE == "MULTI" -o $GS_LAUNCH_MODE == "MPI" ]; then
+      SOURCE_FILES=$(find "$SOURCE_DIR/regions" -maxdepth 1 -iregex ".*/1?[0-9].cwf" -printf \'%p\'\  2>/dev/null )
+      if [ ${#SOURCE_FILES} -eq 0 ]; then
+         
+         # If running in --filterOnly mode, don't search for the regions.orig folder.
+         if [ $FILTER_ONLY -eq 0 ] ; then
+            SOURCE_FILES=$(find "$SOURCE_DIR/regions.orig" -maxdepth 1 -iregex ".*/1?[0-9]*.wells" -printf \'%p\'\  2>/dev/null )
+         fi
+         
+         if [ ${#SOURCE_FILES} -eq 0 ]; then
+            SOURCE_FILES=$(find "$SOURCE_DIR/regions" -maxdepth 1  -iregex ".*/1?[0-9]*.wells" -printf \'%p\'\  2> /dev/null )
+            if [ ${#SOURCE_FILES} -eq 0 ]; then
+               echo
+               echo Cannot find any wells files to process in: >&2
+               echo   $SOURCE_DIR. >&2
+               echo
+               echo     You must specify a source directory with 
+               
+               if [ $FILTER_ONLY -eq 0 ] ; then
+                  echo     a \"regions\" or \"regions.orig\" folder 
+               else
+                  echo     a \"regions\" folder 
+               fi
+               
+               echo     containing at least one cwf or wells file.
+               echo
+               exit 1
+            fi
+         fi
+      fi
+      
+      # Create the directory for the analysis output.
+      mkdir -p "$DIRNAME" 2>/dev/null
+      if [ $? -ne 0 ] ; then
+         echo -n "Unable to create directory: $DIRNAME"
+         if [ ! -w "$DIRNAME" ] ; then
+            echo ": Permission Denied"
+            echo -n "Either change the permissions to allow writing or set --out to a writable directory."
+         fi
+         echo ""
+         exit 1
+      fi
+      
+      if [ $QUIET -eq 0 ]; then
+         echo "Output files will appear in $DIRNAME" 
+      fi
+      
+      eval $COMMAND_PREFIX $REAL_GSRUNPROCESSOR_BIN\
+         --out=\"$DIRNAME/regions\"\
+         --log=\"$DIRNAME/gsRunProcessor.log\"\
+         --error=\"$DIRNAME/gsRunProcessor_err.log\"\
+         $ARGS $SOURCE_FILES
+      
+   elif [ $GS_LAUNCH_MODE="GSRPM" ]; then
+      if [ $QUIET -eq 0 ]; then
+         # Get the version of gsRunProcessor.
+         VERSION_STRING=" [`gsRunProcessorManagerCtrl queryVersion 2>/dev/null | grep -e '^gsRunProcessor '`]"
+         
+         if [ $? -ne 0 ] ; then
+            VERSION_STRING=""
+         fi
+         
+         echo "Launching job with gsRunProcessorManager${VERSION_STRING}. Please wait."
+      fi
+      
+      export GSRP_ENV
+      if [ -e $PIPELINE_NAME ]; then
+         JOBID=$(gsRunProcessorManagerCtrl --port=$GS_XML_PORT -m launch "$(readlink -f $PIPELINE_NAME)" "$SOURCE_DIR" "" $REGION_RANGE $VERBOSE_OPTION $EXTRA_PARAMS)
+         RETVAL=$?
+      else
+         JOBID=$(gsRunProcessorManagerCtrl --port=$GS_XML_PORT -m launch $PIPELINE_NAME "$SOURCE_DIR" "" $REGION_RANGE $VERBOSE_OPTION $EXTRA_PARAMS)
+         RETVAL=$?
+      fi
+      
+      if [ $RETVAL -eq 0 ]; then
+         sleep 3
+         STAT=$(gsRunProcessorManagerCtrl  --port=$GS_XML_PORT -m status $JOBID)
+         OUTDIR=$(gsRunProcessorManagerCtrl --port=$GS_XML_PORT -m outdir $JOBID)
+         OUTDIR=$(dirname "$OUTDIR")
+         if [ $STAT == "RUNNING" ]; then
+            if [ $QUIET -eq 0 ]; then
+               gsRunProcessorManagerCtrl  --port=$GS_XML_PORT status $JOBID 
+               echo
+               echo "You can monitor the status of the job by viewing:"
+               echo " $OUTDIR/gsRunProcessor.log"
+               echo
+               echo "You can stop the job by calling the following command:"
+               echo " gsRunProcessorManagerCtrl abort $JOBID"
+               echo
+            fi
+         elif  [ $STAT == "QUEUED" ]; then
+            if [ $QUIET -eq 0 ]; then
+               echo
+               echo "**Your job is queued for later processing.**"
+               gsRunProcessorManagerCtrl --port=$GS_XML_PORT queue
+               echo "After the jobs starts, you can monitor the status of the job by viewing:"
+               echo " $OUTDIR/gsRunProcessor.log"
+               echo
+               echo "You can stop the job by calling the following command:"
+               echo " gsRunProcessorManagerCtrl abort $JOBID"
+               echo
+            fi
+         else
+            echo 
+            echo "There was an error launching your job. View the gsRunProcessorManager"
+            echo "log or the log in $OUTDIR for possible causes."
+            echo
+         fi
+      
+      else 
+         # The error message is printed out and shows up as our JOBID.
+         echo
+         echo $JOBID
+         echo
+         exit $RETVAL
+      fi
+   fi
+fi

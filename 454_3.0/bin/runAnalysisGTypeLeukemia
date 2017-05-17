@@ -1,0 +1,3184 @@
+#!/usr/bin/perl -w
+## Copyright (c) [2010-2012] 454 Life Sciences Corporation.
+## All Rights Reserved.
+##
+## FOR LIFE SCIENCE RESEARCH ONLY.
+## NOT FOR USE IN DIAGNOSTIC PROCEDURES.
+##
+## THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+## EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+## OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+## NON-INFRINGEMENT.
+##
+## THIS PARTICULAR SOFTWARE IS EXPERIMENTAL CODE, PROVIDED
+## AS A CONVENIENCE TO AUGMENT THE FUNCTIONALITY OF OFFICIALLY
+## RELEASED SOFTWARE AND SHALL NOT BE DISTRIBUTED TO THIRD PARTIES
+## WITHOUT EXPLICIT AUTHORIZATION FROM 454 LIFE SCIENCES CORPORATION.
+## IT IS NOT ITSELF PART OF AN OFFICIAL SOFTWARE RELEASE AND, AS SUCH, IS
+## NOT OFFICIALLY SUPPORTED.
+##
+## IN NO EVENT SHALL 454 LIFE SCIENCES CORPORATION OR ANY OTHER
+## ROCHE COMPANY BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+## WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+## OUT OF OR IN CONNECTION WITH THE SOFTWARE.
+##
+
+use strict;
+use Getopt::Long;
+use Time::Local;
+use FileHandle;
+use File::Basename;
+use Cwd 'abs_path';
+$| = 1;
+
+my $softwareName = "GType Leukemia";
+my $tagInfo      = "v20140115_1333";
+my $version      = "2.3";
+
+# Variables required for usage statement
+my $expectedVer = '2.3';
+my $ruoMsg = "FOR LIFE SCIENCE RESEARCH ONLY\nNOT FOR USE IN DIAGNOSTIC PROCEDURES\n";
+
+# Program usage statement
+
+sub basicUsage {
+    print STDERR <<BASIC_USAGE_TERMINATOR;
+USAGE
+   $0 (--dd <dataDirectory> | --sd <sffDirectory>)
+       [--od <outputDirectory>]
+       [--al <assayLayout>]
+       [--fromPipeline <true|false>]
+       [--linkSff <true|false>]
+       [[--sip <softwareInstallPath>] | [--dap <doAmpliconPath>]]
+       [--cpu <numberOfCpusToUse>]
+       [--verbose]
+       [--version]
+       [--help]
+
+    Items in [brackets] are optional. Lists of items separated by the vertical
+    bar | indicate that one and only one of the items should be used at a time.
+    The options --version and --help are stand-alone options that should not
+    be combined with any other options.
+
+BASIC_USAGE_TERMINATOR
+}
+
+sub advancedUsage {
+    print STDERR <<ADVANCED_USAGE_TERMINATOR;
+ADVANCED USAGE
+   $0 (--dd <dataDirectory> | --sd <sffDirectory>)
+      ([--pd <projectDirectory>] | [--od <outputDirectory>])
+       [--al <assayLayout>]
+       [--fromPipeline <true|false>]
+       [--linkSff <true|false>]
+       [[--sip <softwareInstallPath>] | [--dap <doAmpliconPath>]]
+       [--cpu <numberOfCpusToUse>]
+       [--verbose]
+       [--version] 
+       [--help]
+       [--am <analysisMode (standard|custom)>]
+       [--fput <(none|default|tailSeq1,tailSeq2)>]
+       [--iml <includedMidList>]
+       [--setup]
+       [--compute]
+       [--report]
+       [--overwriteEnabled]
+       [--allowMixedSFF]
+       [--advancedHelp]
+
+    Items in [brackets] are optional. Lists of items separated by the vertical
+    bar | indicate that one and only one of the items should be used at a time.
+    The options --version, --help and --advancedHelp are stand-alone options 
+    that should not be combined with any other options.
+    
+    The options "--pd", and all those listed from "--setup" to "--advancedHelp"
+    are advanced/extra features that are not officially supported as part of 
+    this software release.
+
+ADVANCED_USAGE_TERMINATOR
+}
+
+sub basicUsageAndDie {
+    &basicUsage();
+    print STDERR "\n$ruoMsg\n";
+    exit(1);
+}
+
+sub advancedUsageAndDie {
+    &advancedUsage();
+    print STDERR "\n$ruoMsg\n";
+    exit(1);
+}
+
+sub basicHelp {
+    &basicUsage();
+    &basicHelpDescription();
+    print STDERR "\n$ruoMsg\n";
+}
+
+sub advancedHelp {
+    &advancedUsage();
+    &advancedHelpDescription();
+    print STDERR "\n$ruoMsg\n";
+}
+
+sub basicHelpDescription {
+    &basicHelpScriptDescription();
+    &basicHelpOptDescriptions();
+    &basicHelpExample();
+    &basicHelpTail();
+}
+
+sub advancedHelpDescription {
+    &advancedHelpScriptDescription();
+    &advancedHelpOptDescriptions();
+    &advancedHelpExample();
+    &advancedHelpTail();
+}
+
+sub basicHelpScriptDescription {
+    print STDERR <<BASIC_HELP_TERMINATOR;
+DESCRIPTION
+
+    The standard analysis mode of this script processes the data for 
+    experiments designed using protocols for the GType Leukemia LSR primer 
+    plates. This script is capable of processing data from the GS GType RUNX1
+    and GS GType TET2/CBL/KRAS primer plates and if nothing is specified via 
+    the --assayLayout (--al) parameter the script will automatically look for
+    both types of data in each region. 
+
+    The analysis sets up and computes an AVA project for the data. Users can
+    view alignments of sample reads versus their references on a per-amplion
+    basis. Annotated marker variants are defined in the project to assist with
+    correlating variants observed in AVA with the coordinate system of the 
+    reference CDS regions used in the literature. FASTA format files of the SFF
+    files used in the project are provided to facilitate analysis in third 
+    party software not compatible with SFF files. 
+
+BASIC_HELP_TERMINATOR
+}
+
+sub advancedHelpScriptDescription {
+    &basicHelpScriptDescription();
+    print STDERR <<ADVANCED_HELP_TERMINATOR;
+    The custom analysis mode of this script allows processing of experiments
+    that use the same amplicons as the GType Leukemia LSR primer plates, but 
+    using primers synthesized by the user (to perhaps use different or
+    additional MIDs or to use a 4-primer system). Custom analyses must meet
+    the following criteria:  
+        (1) The analysis must only include amplicons where the sequence 
+            specific primers match the primers in the amplicons used
+            on the GType Leukemia LSR primer plates. 
+        (2) MIDs used to identify samples must be chosen from the 454Expanded 
+            set of 153 suggested MIDs.
+        (3) MIDs must be used symmetrically (same MID on both sides of the 
+            amplicons).
+        (4) If 4-primer universal tails were used for the experiment you must 
+            use the --fput (four primer universal tail) option to provide a 
+            comma separated list of the forward and reverse tail pair used.
+
+    The default custom mode analysis measures for all amplicons using
+    all 153 454Expanded MIDs for each region in the run, treating the regions 
+    as independent. The --iml (includedMidList) option can be used to restrict 
+    the MIDs used in the experiment to those actually used. An 'X' can be added
+    to the list to force those MIDs not explicitly mentioned by --iml to be 
+    measured as 'X_Samples' per region as a means of detecting laboratory 
+    errors or contamination.
+    
+ADVANCED_HELP_TERMINATOR
+}
+
+sub basicHelpOptDescriptions {
+    print STDERR <<BASIC_HELP_TERMINATOR;
+OPTIONS
+
+     --dd, --dataDir <dataDirectory>     
+         The location of the standard "D_" directory for a sequencing run that
+         contains the SFF files to analyze in its "sff" subdirectory
+
+     --sd, --sffDir <sffDirectory>     
+         The location of a directory containing the SFF files to analyze.
+
+     --od, --outputDir <outputDirectory>     
+         The directory where the analysis results should be written.
+
+    --al, --assayLayout <assayLayout>
+         This option is used to specify which assay analyses should be done
+         for each region by supplying an assayLayout code. Valid assay names
+         are 'RUNX1' and 'TET2_CBL_KRAS'. If this option is omitted entirely,
+         all valid assays will be measured for each available region to make
+         sure all valid amplicons get measured. Assays measured for a region
+         where they were not used should not produce alignments in the final
+         AVA project produced by the analysis. 
+
+         If a given assay is going to be applied uniformly to all read data,
+         the assay name is sufficient as an assayLayout code (The option 
+         "--al RUNX1" would apply RUNX1 analysis to all available regions). 
+
+         If a particular assay only applies to a few specific regions, the 
+         assayLayout code can be expanded to the format regionList=assayName
+         where regionList can be a comma-separated list of numbers or number
+         ranges. A code like "1,3,5-8=RUNX1" indicates that the RUNX1 assay 
+         should be applied to regions 1, 3, 5, 6, 7, and 8. 
+
+         If more than one assayLayout code is necessary, the codes can be
+         listed with separating semicolons. A code like 
+         "1,3=RUNX1;2,4=TET2_CBL_KRAS" indicates that RUNX1 should be applied
+         to the odd regions (1 and 3) and that TET2_CBL_KRAS should be applied
+         to the even regions (2 and 4). 
+
+         The keyword "NONE" can be used instead of an assayname to exclude 
+         specific regions from analysis ("1=RUNX1;2,3=NONE;4=TET2_CBL_KRAS"
+         would exclude regions 2 and 3 from analysis). If region specific 
+         assays are assigned and a region is not metioned but is not explicitly
+         set to "NONE", then that region will have all assays applied to it as
+         a safety measure (as opposed to skipping the region entirely). 
+
+         When using complex assayLayout codes with region lists or lists of
+         codes, surround the complete code in quotes when specifying it on the
+         command line. The use of "NONE" as a bare code (instead of associating
+         it with specific regions) results in a error. If the net result of a
+         code is that no regions have assay assignments, this will also result
+         in an error.
+     
+     --fp, --fromPipeline  ( true | false )
+         When this option is set to true it signals the script to exhibit 
+         pipeline-specific behavior like split logging to STDOUT and 
+         STDERR.  It also sets the default for --linkSff to true. 
+
+     --ls, --linkSff ( true | false )     
+         Determine if the SFF files imported as Read Data into the AVA project
+         should be symbolic links rather than true file copies.  If not
+         specified, defaults to same value as --fromPipeline (i.e., true if
+         --fromPipeline is true, and false otherwise).
+
+     --sip, --softwareInstallPath <softwareInstallPath>
+         The path to the 454 Software installation such as /opt/454/.  This is
+         used to help locate the appropriate version of doAmplicon.  May be
+         used instead of --doAmpliconPath (--dap).
+
+     --dap, --doAmpliconPath <doAmpliconPath>     
+         The explicit path to the doAmplicon command to use when invoking the
+         AVA sofware. If neither the softwareInstallpath (--sip) nor the
+         doAmpliconPath (--dap) are provided, the program will search for
+         doAmplicon and report an error if it can not find one. If an explicit
+         doAmplicon path is provided, and the corresponding AVA version is
+         incorrect, the script will assume that processing is being forced
+         with an older version of the software that may or may not work; a
+         warning will be provided, and the processing will be attempted. The
+         data should eventually be reprocessed using the proper version of the
+         software.
+
+     --cpu <numberOfCpusToUse>
+         An integer specifying the number of processors to use, in parallel,
+         during the AVA computation.  If not given, defaults to 1.  The special
+         value 0 may be given to indicate that all processors be used.
+         
+     --verbose
+         Allows additional messages involving Debugging or Tracing to be
+         displayed and written to the log file. 
+
+     --version
+         Displays a version string for this program. 
+
+     --h, --help     
+         Display this help message.
+BASIC_HELP_TERMINATOR
+}
+
+sub advancedHelpOptDescriptions {
+    &basicHelpOptDescriptions();
+    print STDERR <<ADVANCED_HELP_TERMINATOR;
+
+     --pd, --projectDir <projectDirectory>
+         Provide the path to an AVA project to use for the computation.  When
+         using the --setup action flag, the project may not already exist
+         unless	the --overwriteEnabled flag is also used to allow it to be
+         overwritten. When using the --compute and/or --report action flags,
+         without a --setup flag at the same time, the AVA project must already
+         exist. Results files, logs, and scripts are written to the same
+         directory containing the AVA project and are named as suffixed forms
+         of the project name.
+
+     --am, --analysisMode <analysisMode (standard|custom)>
+         The type of analysis to run on the data. Available choices are 
+         "standard" and "custom". One and only one mode mode should be
+         provided. Setting defaults to standard if option not provided.
+
+         standard    Process the data as a standard GType Leukemia LSR 
+                     experiment.
+
+         custom      Use the GType Leukemia LSR sequence specific amplicon 
+                     primers.Measure all amplicons and all 153 potential 
+                     454Expanded MID sequences per region, treating each 
+                     region independently.
+
+     --fput, --fourPrimerUniversalTails <(none|default|tailSeq1,tailSeq2)>
+         Provide a keyword to indicate which four-primer universal tails were 
+         used for a custom experiment, or provide a comma-separated list of 
+         the forward-reverse tail sequence pair. Setting defaults to "none" 
+         if option not provided.
+ 
+         none                 Tails were not used for the experiment.
+
+         tailSeq1,tailSeq2    Specify the comma-separated pair of forward and 
+                              reverse tail sequences (in that order), such as 
+                              "ATCGACACACGTGCACGCACGA,TCTACTACAACTGTACCCACAC"
+
+     --iml, --includedMidList <includedMidList>
+         The "custom" analysis mode measures all 153 454Expanded MID sequences
+         by default. If you want to restrict your analysis to a particular 
+         subset within the 153 MIDs, you can use this option to specify which 
+         MIDs you are actually using in the experiment. Supply a comma 
+         separated list of MID numbers and/or number ranges such
+         as: --iml "20,22-25,31,33-36". The numbers you supply here must exist
+         in the MID superset for the analysis mode you have chosen. Adding an
+         "X" as a list member will cause all of the unused MIDs not explicitly
+         mentioned in the list to be measured as "X_Samples" to allow detection
+         of laboratory errors and contamination.
+
+     --setup
+         Assert finer control over the computation process and only set up the
+         AVA project with Read Data (SFF files) specified via the --dd or --sd
+         options, but perform no computation unless the --compute option is
+         also specified.
+     	
+     --compute     
+         Compute the specified AVA project (which may have just been created
+         via the --setup option, but which may have also already existed).
+
+     --report
+         Produce computation output based on an AVA project that has already
+         been computed (or which may have just been computed by also specifying
+         the --compute option).
+
+
+     --oe, --overwriteEnabled     
+         As a safety measure, the program will not overwrite pre-existing AVA
+         projects or output files unless this flag is used to allow
+         overwriting.
+         
+     --allowMixedSFF
+         Allow the use of SFF files from different sequencing runs, so long as
+         the SFF files represent disjoint regions.
+
+     --ah, --advancedHelp
+         Show this help message including advanced options.
+ADVANCED_HELP_TERMINATOR
+}
+
+sub basicHelpExample {
+    print STDERR <<BASIC_HELP_TERMINATOR;
+
+EXAMPLE
+
+    Provided that the user has write permission to the D_ directory and that 
+    version $expectedVer or higher of AVA is installed, the simplest invocation
+    of this program to fully process a GType Leukemia LSR run would simply be 
+    to specify the D_ directory as input. An example command might look like:
+	
+% $0 --dd /data/2010_12_08/R_2010_12_08_11_49_30_rig3_user_annotation/D_2010_12_08_12_29_02_frontend2_signalProcessingAmplicons/
+
+    (NOTE: in this example the % represents the command line prompt and is not
+    part of the actual command issued by the user.  Also, all the command line
+    arguments are on a single line, including the path to the Run Directory,
+    even though the text may be split across multiple lines in the formatting
+    of this documentation.)	
+	
+    The command above would create an Extra Processing (or E_ directory) within
+    the D_ directory provided via the --dd parameter. The E_ directory would
+    look something like "E_2010_12_05_20_19_09_GTypeLeukemia" (where the 
+    numbers are derived from the date and time the program was run).  While 
+    processing the data, an AVA project would be created within the 
+    E_ directory.  The above command would result in files/directories being 
+    created in the following location: 
+
+/data/
+ 2010_12_08/
+   R_2010_12_08_11_49_30_rig3_user_annotation/
+     D_2010_12_08_12_29_02_frontend2_signalProcessingAmplicons/
+          E_2010_12_08_20_19_09_GTypeLeukemia/
+               AVA_Project_2010_12_08_20_19_09_GTypeLeukemia/
+               fasta/
+               GTypeLeukemia_analysis.log
+
+    If the user does not have write access to the D_ directory, they can use
+    the --outputDir option to specify an alternate directory to contain
+    the E_ directory.  If the E_ directory is going to be stored separately
+    from the D_ directory like this, and if the AVA projects are being kept,
+    setting --linkSff to false would be advisable (since, if the D_ directory
+    gets archived and moved/deleted, it would break the symbolic links in the
+    AVA projects). If multiple versions of AVA are installed on the machine or
+    if the install is in a non-standard location, the --dap option can be used
+    to specify the path to doAmplicon (the AVA CLI). 
+
+    Here is an alternate command that would be typical for processing the data
+    locally (rather than writing to the original run directory or because you 
+    do not have write permission for the run area):
+
+% $0 --sd /data/2010_12_08/R_2010_12_08_11_49_30_rig3_user_annotation/D_2010_12_08_12_29_02_frontend2_signalProcessingAmplicons/sff/ --od /home/adminrig/Leukemia_Analysis/TestRun001/ --dap /opt/454/bin/doAmplicon --linkSff false --cpu 0
+
+    Similar to the first example command, the command above writes output to 
+    an E_ directory, this time within the output directory provided by "--od"
+    option.
+
+/home/
+  adminrig/
+    Leukemia_Analysis/
+      TestRun001/
+        E_2010_12_08_20_19_09_GTypeLeukemia/
+            AVA_Project_2010_12_08_20_19_09_GTypeLeukemia
+            fasta/
+            GTypeLeukemia_analysis.log
+
+    Using "--sd", rather than "--dd", allows you to specify the exact directory
+    containing your sff files. Providing "--dap" makes explicit the particular
+    version of doAmplicon being used and setting "--linkSff" to false forces 
+    the sff files in the run to be copied to the AVA project (rather than using
+    symbolic links) so that if the parent run data gets moved, it will not
+    break the AVA project.
+
+BASIC_HELP_TERMINATOR
+}
+
+sub advancedHelpExample {
+    &basicHelpExample();
+}
+
+sub basicHelpTail {
+    print STDERR "\n";
+}
+
+sub advancedHelpTail {
+    print STDERR <<ADVANCED_HELP_TERMINATOR;
+
+    The three advanced action flags (--setup, --compute, and --report) are
+    only needed if the user desires to split the process into steps. If none
+    of the flags are provided, the program assumes you want the default, which
+    is complete processing (as if all three flags were supplied). If the flags
+    are used, they may be used separately or in combination as long as they
+    make logical sense (--setup and --report can not be used as a pair since
+    reporting requires that the project be computed).
+	
+ADVANCED_HELP_TERMINATOR
+}
+
+# Global variables with defaults.
+
+my $expectedMidCount  = 11;
+my $analysisTypeLabel = "GTypeLeukemia";
+my $defaultCPUValue   = 1;
+
+my @preferredBinDirs = 
+    (
+     '/opt/454/apps/amplicons/bin/', '~/454/apps/amplicons/bin/',
+     './454/apps/amplicons/bin/',    '/opt/454*/apps/amplicons/bin/',
+     '~/454*/apps/amplicons/bin/',   './454*/apps/amplicons/bin/',
+     '/opt/*/apps/amplicons/bin/',   '~/*/apps/amplicons/bin/',
+     './*/apps/amplicons/bin/'
+     );
+
+my %validLogClasses = (
+    "Fatal"       => "1",
+    "Critical"    => "1",
+    "Error"       => "1",
+    "Warning"     => "1",
+    "Notice"      => "1",
+    "Information" => "1",
+    "Debug"       => "1",
+    "Trace"       => "1"
+);
+
+my %validModes = (
+    "STANDARD" => "1",
+    "CUSTOM"   => "1"
+);
+
+my %validUniversalTails = (
+    "NONE"    => ["",""],
+    "DEFAULT" => ["",""]
+);
+
+my $standardMidGroup = "454Extended";
+
+my %defaultAssayData = 
+    (
+     'NONE' => 
+     {'sampleMids' => [],
+      'controlMids' => [],
+      'amps' => {'NONE' => []}},
+     'RUNX1' => 
+     {'sampleMids' => [map {"Mid" . $_} (1 .. 4, 6, 8, 10, 13, 15, 16, 18, 19)],
+      'controlMids' => ['Mid17'],
+      'amps' => 
+      {'RUNX1' => ['RUNX1_E03', 'RUNX1_E04', 'RUNX1_E05', 'RUNX1_E06', 
+		   'RUNX1_E07', 'RUNX1_E08.01', 'RUNX1_E08.02']}},
+     'TET2_CBL_KRAS' => 
+     {'sampleMids' => ['Mid1','Mid2','Mid4'],
+      'controlMids' => ['Mid5'],
+      'amps' => 
+      {'CBL' => ['CBL_E08', 'CBL_E09'], 
+       'KRAS' => ['KRAS_E02', 'KRAS_E03'], 
+       'TET2' => ['TET2_E03.01', 'TET2_E03.02', 'TET2_E03.03', 'TET2_E03.04', 
+		  'TET2_E03.05', 'TET2_E03.06', 'TET2_E03.07', 'TET2_E03.08', 
+		  'TET2_E03.09', 'TET2_E03.10', 'TET2_E03.11', 'TET2_E03.12', 
+		  'TET2_E03.13', 'TET2_E04', 'TET2_E05', 'TET2_E06', 
+		  'TET2_E07', 'TET2_E08', 'TET2_E09', 'TET2_E10.01', 
+		  'TET2_E10.02', 'TET2_E11.01', 'TET2_E11.02', 'TET2_E11.03', 
+		  'TET2_E11.04', 'TET2_E11.05', 'TET2_E11.06']}}
+     );
+
+# Input option variables
+my $projectDir               = "";
+my $dataDir                  = "";
+my $sffDir                   = "";
+my $doAmpPath                = "";
+my $sffinfoPath              = "";
+my $doAmpVer                 = "";
+my $softwareInstallPath      = "";
+my $setup                    = "";
+my $compute                  = "";
+my $report                   = "";
+my $overwriteEnabled         = "";
+
+my $analysisMode             = 0;
+my $assayLayout              = "";
+my $includedMidList          = "";
+my $fourPrimerUniversalTails = "";
+my $groupBy                  = "";
+my $splitBy                  = "";
+my $includeKey               = "";
+my $showHelp                 = 0;
+my $linkSff                  = 0;
+my $fromPipeline             = 0;
+my $outputDir                = "";
+my $allowMixedSFF            = 0;
+my $showVersion              = 0;
+my $verbose                  = 0;
+my $showAdvancedHelp         = 0;
+my $cpu                      = undef;
+my $commandLine              = join(" ", ($0, @ARGV));
+
+# Obtain command line parameters
+GetOptions(
+	   'projectDir|pd=s'                 => \$projectDir,
+	   'dataDir|dd=s'                    => \$dataDir,
+	   'sffDir|sd=s'                     => \$sffDir,
+	   'doAmpliconPath|dap=s'            => \$doAmpPath,
+	   'softwareInstallPath|sip=s'       => \$softwareInstallPath,
+	   'outputDir|od=s'                  => \$outputDir,
+	   'setup'                           => \$setup,
+	   'compute'                         => \$compute,
+	   'report'                          => \$report,
+	   'fromPipeline|fp=s'               => \$fromPipeline,
+	   'cpu=s'                           => \$cpu,
+	   'version'                         => \$showVersion,
+	   'verbose'                         => \$verbose,
+	   'linkSff|ls=s'                    => \$linkSff,
+	   'allowMixedSFF|ams'               => \$allowMixedSFF,
+	   'overwriteEnabled|oe'             => \$overwriteEnabled,
+	   'analysisMode|am=s'               => \$analysisMode,
+	   'assayLayout|al=s'                => \$assayLayout,
+	   'includedMidList|iml=s'           => \$includedMidList,
+	   'fourPrimerUniversalTails|fput=s' => \$fourPrimerUniversalTails,
+	   'help|h'                          => \$showHelp,
+	   'advancedHelp|ah'                 => \$showAdvancedHelp,
+	   ) or &basicUsageAndDie();
+
+my $hasOpt = 0;
+&countOpts();
+
+sub countOpts {
+
+    # Keep a count of how many explicit options have been provided by the user.
+    $hasOpt += 1 if ($projectDir);
+    $hasOpt += 1 if ($dataDir);
+    $hasOpt += 1 if ($sffDir);
+    $hasOpt += 1 if ($doAmpPath);
+    $hasOpt += 1 if ($softwareInstallPath);
+    $hasOpt += 1 if ($outputDir);
+    $hasOpt += 1 if ($setup);
+    $hasOpt += 1 if ($compute);
+    $hasOpt += 1 if ($report);
+    $hasOpt += 1 if ($fromPipeline);
+    $hasOpt += 1 if (defined($cpu));
+    $hasOpt += 1 if ($showVersion);
+    $hasOpt += 1 if ($verbose);
+    $hasOpt += 1 if ($linkSff);
+    $hasOpt += 1 if ($allowMixedSFF);
+    $hasOpt += 1 if ($overwriteEnabled);
+    $hasOpt += 1 if ($analysisMode);
+    $hasOpt += 1 if ($assayLayout);
+    $hasOpt += 1 if ($includedMidList);
+    $hasOpt += 1 if ($fourPrimerUniversalTails);
+    $hasOpt += 1 if ($showHelp);
+    $hasOpt += 1 if ($showAdvancedHelp);
+}
+
+# Global variables to be derived from command line parameters
+my $reportFile      = "";
+my $rdPath          = "";
+my @rdFiles         = ();
+my %rdAssayMap      = ();
+my %requiredAssays  = ();
+my $projName        = "";
+my $eDirName        = "";
+my $outputDirFasta  = "";
+my $outputDirParent = "";
+my $isClassicMode   = 0;
+my $gsAmpPath       = "";
+my $logFile         = "";
+my $logFH           = undef;
+
+# Global variables for tracking command line parameter processing.
+my @problems = ();
+my @notes    = ();
+
+# Global variables for setup content
+my %allAmpData                   = ();
+my %allMidData                   = ();
+my %sampleAmpData                = ();
+my %alignData                    = ();
+my %newOldSamp                   = ();
+my %midInclusionSet              = ();
+my $xSamplesEnabled              = 0;
+my %xSampleMids                  = ();
+my $providedForwardUniversalTail = "";
+my $providedReverseUniversalTail = "";
+my $outDirDumper                 = "";
+my %outFh                        = ();
+my $masterCounter                = 0;
+my $seqKey                       = "tcag";
+my $reportVariants               = 1;
+my $moduleName                   = basename($0);
+
+# Validate the command line parameter input
+
+# First check the stand-alone options that shouldn't be mixed with
+# other options
+&checkVersion();
+&checkHelpFlag();
+&checkAdvancedHelpFlag();
+
+# The fromPipeline should be checked next because it influences some defaults..
+&checkFromPipeline();
+
+# These parameter checks are independent and order shouldn't matter.
+&checkCpu();
+&checkVerbose();
+&checkLinkSff();
+&checkOverwriteFlag();
+&checkAllowReadDataSupersets();
+
+&checkAnalysisMode();
+
+
+# These two checks need to happen after the analysisMode check.
+&checkIncludedMidList();
+&checkUniversalTails();
+
+# These two checks must be done in this order.
+&checkDoAmpLocation();
+&checkGsAmp();
+&checkSffinfo();
+
+# These four checks should be done in this order.
+&checkActions();
+&checkDataLocation();
+&checkOutputOptions();
+&validateActions();
+
+# This check needs to occur after the data location check because it
+# expects @rdFiles to be populated.
+&checkAssayLayout();
+
+# Display the usage statement if no options have been provided
+# or if any problems were encountered when validating the command
+# line parameters.
+if (@problems && $hasOpt || !$hasOpt) {
+    &basicUsage();
+}
+
+# Report command line parameter problems
+if ($hasOpt && @problems) {
+
+    # Only report problems if the user has attempted to supply a
+    # command line option. If the user supplies no options, assume
+    # they are not actually running the program and want to see
+    # a clean usage statement instead.
+
+    my $errLine = join("\n\n", (@problems));
+    $errLine = "Execution Problems:\n\n${errLine}\n\n";
+    &logLine($errLine);
+
+}
+
+# &checkLog can involve creation of an output directory. That is why
+# it is called here after it has been established that there are no other
+# command line issues. However, the creation of the log file can fail.
+# This failure will be evident by the $logFH not being set to undef.
+&checkLog() if (!@problems);
+
+# Display notes after problems have been reported so they
+# will be visible to users at the bottom of the screen.
+if (@notes) {
+    my $noteLine = join("\n\n", (@notes));
+    $noteLine = "NOTE:\n\n${noteLine}\n\n";
+    &logLine($noteLine);
+}
+
+# Display a notice about the specific programs being used to process the data.
+&logLine(
+	 join("\n",
+	      "Without an override, the following doAmplicon program is the current choice",
+	      "to be used for command line processing ($doAmpVer):",
+	      "\n$doAmpPath\n\n")
+	 );
+&logLine(
+	 join("\n",
+	      "The following gsAmplicon program would be appropriate to use to examine the",
+	      "AVA project with the GUI:\n$gsAmpPath\n\n")
+	 ) if (!@problems);
+
+if (!$hasOpt || @problems || !$logFH) {
+    if (!$hasOpt && !$logFH) {
+        print STDERR "\n$ruoMsg\n";
+    }
+    
+    # If no options have been provided or problems
+    # have been encountered, exit the script.
+    exit(1);
+}
+
+# Setup the AVA project if requested by --setup flag.
+&executeActionIfNeeded('setup');
+
+# Run the computation for the AVA project if requested by --compute flag.
+&executeActionIfNeeded('compute');
+
+# Dump a variantHits report for the AVA project
+# if requested by the --report flag.
+&executeActionIfNeeded('report');
+
+# Signal that the script processing is complete.
+&logLine("All script processing is complete.\n\n");
+
+# Exit with a return code of 0 for a successful run.
+exit(0);
+
+# Script subroutines
+
+sub checkOutputOptions {
+    &checkProjectDir();
+    &checkOutputDir();
+    
+    if ($projectDir && $outputDir) {
+        push(@problems,
+	     "The --projectDir (--pd) option cannot be combined with the --outputDir (--od) option.\n"
+	     );
+    } elsif ($projectDir && !$outputDir) {
+        # Use the directory containing $projectDir as
+        # an $outputDir. Use project name as a
+        # prefix for output. This is classic manual mode as
+        # opposed to newer pipeline style.
+        $isClassicMode = 1;
+        $reportFile    = $projectDir . '.variantHits.report.txt';
+        $logFile       = $projectDir . '.logFile.txt';
+        ($projName) = ($projectDir =~ /([^\/]+)$/);
+        my $pDir = $projectDir;
+        $pDir =~ s/$projName$//;
+        if (!$pDir) {
+            $pDir = './';
+	}
+	$outputDir   = $pDir;
+	$outputDirFasta = $projectDir;
+        $outputDirFasta =~ s/\/$//;
+	$outputDirFasta .= '_fasta';
+    }  elsif (!$projectDir && $outputDir) {
+	
+	# Use $outputDir to construct $projectDir.
+	&getExtraProcessingDirName();
+	&getAvaProjNameFromEDirName();
+	my $repName = &getReportNameFromEDirName();
+	$outputDirParent = $outputDir;
+	$outputDir       = "${outputDir}/${eDirName}";
+	$outputDirFasta  = "${outputDir}/fasta";
+	$projectDir      = "${outputDir}/${projName}";
+	$reportFile      = "${outputDir}/${repName}";
+	$logFile         = "${outputDir}/${analysisTypeLabel}_analysis.log";
+    } elsif (!$projectDir && !$outputDir) {
+	    
+	# Set a default for $outputDir. Use that default to set
+	# $projectDir and $workAreaDir.
+	&getExtraProcessingDirName();
+	&getAvaProjNameFromEDirName();
+	my $repName = &getReportNameFromEDirName();
+	&getDefaultOutputDir();
+	$projectDir  = "${outputDir}/${projName}";
+	$reportFile  = "${outputDir}/${repName}";
+	$logFile     = "${outputDir}/${analysisTypeLabel}_analysis.log";
+    }
+    &writeTestDirs();
+}
+
+sub writeTestDirs {
+
+    # The messages being pushed onto the @problems array could be potentially
+    # confusing to the user because they refer to the directories in terms of
+    # the command line flags that could set them, but some may have been
+    # derived via computation from other parameters that
+    # actually were supplied.
+
+    if ($isClassicMode && $projectDir) {
+        my $parentDir =
+          (-e $projectDir ? abs_path($projectDir) : $projectDir);
+        $parentDir = dirname($parentDir);
+        if (!-e $parentDir) {
+            push(@problems,
+"The parent directory for the project ($parentDir) does not exist. Supply an alternate --projectDir."
+            );
+        } elsif (!-d $parentDir) {
+            push(@problems,
+"The parent directory for the project ($parentDir) exists but is not a directory. Supply an alternate --projectDir."
+            );
+        } elsif (!-w $parentDir) {
+            push(@problems,
+"You do not have permission to write to the parent directory for the project ($parentDir). Supply an alternate --projectDir."
+            );
+        }
+    } elsif (!$isClassicMode && $outputDirParent) {
+        if (!-e $outputDirParent) {
+            my $parentDir = dirname($outputDirParent);
+            if (!-e $parentDir) {
+                push(@problems,
+"The parent directory of the --outputDir provided ($parentDir) does not exist. Provide an alternate --outputDir."
+                );
+            } elsif (!-d $parentDir) {
+                push(@problems,
+"The parent directory of the --outputDir provided ($parentDir) exists but is not a directory. Provide an alternate --outputDir."
+                );
+            } elsif (!-w $parentDir) {
+                push(@problems,
+"You do not have permission to write to the parent directory of the --outputDir provided ($parentDir). Provide an alternate --outputDir."
+                );
+            }
+        } elsif (!-d $outputDirParent) {
+            push(@problems,
+"The --outputDir provided ($outputDirParent) exists but is not a directory. Provide an alternate --outputDir."
+            );
+        } elsif (!-w $outputDirParent) {
+            push(@problems,
+"You do not have permission to write to the --outputDir provided ($outputDirParent). Provide an alternate --outputDir."
+            );
+        }
+    }
+}
+
+sub checkProjectDir {
+
+    # The projectDir is mandatory and is used as the basis
+    # for output file names. If the setup flag is being used
+    # and the project already exists, the overwriteEnabled
+    # flag needs to be used (to make sure the user really
+    # wants to overwrite the project).
+    if ($projectDir) {
+
+        # Remove trailing slash to facilitate use as a file name prefix.
+        $projectDir =~ s/\/+$//;
+        if ($projectDir !~ /\w+/) {
+            push(@problems, "Improper --projectDir (--pd) provided.");
+        }
+    }
+}
+
+sub checkOutputDir {
+    if ($outputDir) {
+
+        # Remove trailing slash to facilitate use as a file name prefix.
+        $outputDir =~ s/\/+$//;
+    }
+}
+
+sub getDefaultOutputDir {
+    my $localRdPath = $rdPath;
+    if (!$localRdPath || $localRdPath =~ /\/Amplicons\/sff[\/]*$/) {
+
+        # If no rdPath has been provided or has passed validation,
+        # spoof a local subdirectory for the purposes of allowing
+        # output dirs to be constructed.
+        $localRdPath = './sff/';
+        $dataDir     = './';
+    }
+    
+    # Remove trailing slash
+    $localRdPath =~ s/\/+$//;
+    $outputDir = $localRdPath;
+    
+    # Get parent directory.
+    $outputDir = dirname($outputDir);
+    
+    # Add trailing slash
+    $outputDir .= '/';
+    
+    # Record parent directory
+    $outputDirParent = $outputDir;
+    
+    # Construct final output directory
+    $outputDir .= $eDirName;
+    $outputDirFasta = $outputDir . '/fasta';
+}
+
+sub getExtraProcessingDirName {
+    my ($sec, $min, $hour, $mday, $mon, $year, $wday, $yday, $isdst) =
+	localtime(time);
+    $year += 1900;
+    $mon  += 1;
+    $mon  = &leadingZeroPad($mon,  2);
+    $mday = &leadingZeroPad($mday, 2);
+    $hour = &leadingZeroPad($hour, 2);
+    $min  = &leadingZeroPad($min,  2);
+    $sec  = &leadingZeroPad($sec,  2);
+    my $eDir = join("_",
+		    ('E', $year, $mon, $mday, $hour, $min, $sec, $analysisTypeLabel));
+    $eDirName = $eDir;
+}
+
+sub getAvaProjNameFromEDirName {
+    my $pName = $eDirName;
+    if ($pName =~ /^E_/) {
+        $pName =~ s/^E/AVA_Project/;
+        $projName = $pName;
+    } else {
+        push(@problems,
+	     "Extra processing directory name '$pName' is missing or improperly formatted."
+	     );
+    }
+}
+
+sub getReportNameFromEDirName {
+    my $rName = $eDirName;
+    if ($rName =~ /^E_/) {
+        $rName =~ s/^E/VariantHitReport/;
+        $rName = $rName . '.txt';
+    } else {
+        push(@problems,
+"Extra processing directory name '$rName' is missing or improperly formatted."
+        );
+    }
+    return($rName);
+}
+
+sub checkCpu {
+    if (!defined($cpu)) {
+
+        # if no value supplied, default to just 1 processor for safety
+        $cpu = $defaultCPUValue;
+    } elsif ($cpu =~ /^\d+$/) {
+
+        # convert any integer looking strings into an actual integer:
+        $cpu = $cpu + 0;
+    } else {
+        push(@problems,
+"The cpu option must be a non-negative integer. The option defaults to $defaultCPUValue if it is not provided.  The special value 0 indicates that all cpus on the machine should be used."
+        );
+    }
+}
+
+sub checkVerbose {
+
+    # Register if the verbose option has been provided
+    # and set it to the appropriate binary value of 0 or 1.
+    if ($verbose) {
+        $verbose = 1;
+    } else {
+        $verbose = 0;
+    }
+}
+
+sub checkVersion {
+
+    # Register if the version option has been provided
+    # and set it to the appropriate binary value of 0 or 1.
+    if ($showVersion) {
+        $showVersion = 1;
+        if ($hasOpt == 1) {
+            &displayVersionAndExit();
+        } else {
+            push(@problems,
+"The option --version should not be combined with other options."
+            );
+        }
+    } else {
+        $showVersion = 0;
+    }
+}
+
+sub getVersionString {
+    my $versionString = $softwareName . " " . $version . " (" . $tagInfo . ")";
+    return ($versionString);
+}
+
+sub displayVersionAndExit {
+    print &getVersionString(), "\n";
+    exit(0);
+}
+
+sub checkFromPipeline {
+    
+    # Register if the fromPipeline option has been provided
+    # and set it to the appropriate binary value of 0 or 1.
+    if ($fromPipeline || length($fromPipeline) > 1) {
+        $fromPipeline = uc($fromPipeline);
+        if ($fromPipeline eq 'Y'
+            || $fromPipeline eq 'YES'
+            || $fromPipeline eq 'T'
+            || $fromPipeline eq 'TRUE')
+        {
+            $fromPipeline = 1;
+        } elsif ($fromPipeline eq 'N'
+		 || $fromPipeline eq 'NO'
+		 || $fromPipeline eq 'F'
+		 || $fromPipeline eq 'FALSE')
+        {
+            $fromPipeline = 0;
+        } else {
+            push(@problems,
+		 "Improper value provided for --fromPipeline option (use yes or no or true or false)."
+		 );
+        }
+    } else {
+        $fromPipeline = 0;
+    }
+}
+
+sub checkLinkSff {
+
+    # Register if the linkSff option has been provided
+    # and set it to the appropriate binary value of 0 or 1.
+    if ($linkSff || length($linkSff) > 1) {
+        $linkSff = uc($linkSff);
+        if ($linkSff eq 'Y'
+            || $linkSff eq 'YES'
+            || $linkSff eq 'T'
+            || $linkSff eq 'TRUE')
+        {
+            $linkSff = 1;
+        } elsif ($linkSff eq 'N'
+            || $linkSff eq 'NO'
+            || $linkSff eq 'F'
+            || $linkSff eq 'FALSE')
+        {
+            $linkSff = 0;
+        } else {
+            push(@problems,
+"Improper value provided for --linkSff option (use yes or no or true or false)."
+            );
+        }
+    } else {
+        if ($fromPipeline) {
+            $linkSff = 1;
+        } else {
+            $linkSff = 0;
+        }
+    }
+}
+
+sub checkDoAmpLocation {
+
+    # The script needs the appropriate version of the
+    # doAmplicon program (the Command Line Interface (CLI))
+    # to do its work. The path to the doAmplicon program may
+    # either be explicitly provided via the --doAmpliconPath
+    # parameter or the user may instead specify the install
+    # path for their 454 software (such as /opt/454/). If the
+    # user doesn't specify either parameter (--dap or --sip),
+    # this script attempts to find a copy of doAmplicon on
+    # its own. The programs are tested to make sure that they
+    # are the appropriate version (see the $expectedVer
+    # global variable at the top of the script).
+
+    if ($doAmpPath && $softwareInstallPath) {
+        push(@problems,
+"Only one parameter may be used at a time to specify the location of the doAmplicon program. Use either the --doAmpliconPath (-dap) or the --softwareInstallPath (--sip) but not both."
+        );
+    } else {
+        &checkSoftwareInstallPath();
+        &validateDoAmpPath();
+    }
+}
+
+sub checkSoftwareInstallPath {
+
+    # The software install path should be the the path where
+    # the user's 454 software is installed (such as /opt/454/).
+    # It is expected that the installation has a 'bin' directory
+    # with both doAmplicon and gsAmplicon programs installed.
+    if ($softwareInstallPath) {
+        if (!-d $softwareInstallPath) {
+            push(@problems,
+"The provided --softwareInstallPath (--sip $softwareInstallPath) is not a valid directory."
+            );
+        } else {
+            $softwareInstallPath = &slashTerminateDir($softwareInstallPath);
+            $doAmpPath = $softwareInstallPath . 'apps/amplicons/bin/doAmplicon';
+        }
+    }
+}
+
+sub slashTerminateDir {
+
+    # When users provide a directory as the value of a command
+    # line parameter, they may or may not end the directory with
+    # a slash. This subroutine, forces the directory to end in a
+    # single slash so the directory can be used to build deeper
+    # paths in a predictable manner.
+    my ($dir) = @_;
+    $dir .= '/';
+    $dir =~ s/\/+$/\//;
+    return ($dir);
+}
+
+sub validateDoAmpPath {
+
+    # Make sure that a doAmplicon program of the proper
+    # version can be found.
+
+    if ($doAmpPath) {
+
+        # If a doAmpPath has been provided, make sure that it
+        # exists and then verify it is the proper version. If
+        # not, try and search for an alternative and make a
+        #recommendation to the user.
+        if (-e $doAmpPath) {
+            my $oldDoAmpPath = $doAmpPath;
+            ($doAmpPath, $doAmpVer) = &verifyDoAmp($doAmpPath);
+            if (!$doAmpPath) {
+                $doAmpPath = &findDoAmp();
+                if ($doAmpPath) {
+                    push(@problems,
+"Provided --doAmpliconPath (--dap) is not the expected version of the software (expected: $expectedVer or higher). An alternative has been found automatically ($doAmpPath). If the alternative is acceptable, rerun without using the (--dap) parameter (forcing the automatic alternative to be used), or use the the parameter to explicitly provide '$doAmpPath' or to provide another valid alternative."
+                    );
+                } else {
+                    $doAmpPath = $oldDoAmpPath;
+                    push(@problems,
+"The --doAmpliconPath (--dap $doAmpPath) you provided is not the expected version ($expectedVer) and an alternative can not be found automatically. It is strongly recommended that you get the proper version ($expectedVer or higher) of the off instrument applications installed on your machine. When you have the proper software installed, you should  reprocess this data and supply a valid path to the program using the doAmpliconPath parameter (--dap) along with the --overwriteEnabled flag (--oe)."
+                    );
+                }
+            }
+        } else {
+            push(@problems,
+"The --doAmpliconPath (--dap) you provided '$doAmpPath' does not exist. Check the path for typographic errors and try again. If you run the script without the (--dap) and (--sip) parameters, the script will search for a version on its own. If it can't find one automatically and you can't point to a specific path, you will need to get version $expectedVer or higher of the 454 off instrument app software installed on your machine before proceeding."
+            );
+        }
+    } else {
+
+        # If no doAmpPath has been provided by the user,
+        # try and find a copy of the program that is the right
+        # version. If the search fails, warn the user.
+        $doAmpPath = &findDoAmp();
+        if (!$doAmpPath) {
+            push(@problems,
+"Unable to automatically find a valid instance of the doAmplicon program of the proper version ($expectedVer) or higher. Supply the path to the program using the --doAmpliconPath parameter (--dap)."
+            );
+        } else {
+            ($doAmpPath, $doAmpVer) = &verifyDoAmp($doAmpPath);
+        }
+    }
+}
+
+sub validateProjectDirectory {
+
+    # Make sure that the supplied AVA project directory exists
+    # as a directory and that it contains a project setup file.
+    if (-d $projectDir) {
+        my $projFile =
+          $projectDir . '/Amplicons/ProjectDef/ampliconsProject.txt';
+        if (!-e $projFile || !-s $projFile) {
+            push(@problems,
+"The provided --projectDir (--pd $projectDir) is a directory, but does not appear to be setup properly. Rerun the setup using a different project directory or with the same directory but using the --overwriteEnabled (--oe) flag."
+            );
+        }
+    } else {
+        push(@problems,
+"Starting the action pipeline with the --compute flag requires an existing AVA project as input. The provided --projectDir (--pd $projectDir) does not already exist as a directory."
+        );
+    }
+}
+
+sub findDoAmp {
+
+    # Find valid version of doAmplicon on the users system and make a choice.
+
+    my $finalPath = "";
+
+    # First try to find doAmplicon in the installation that this script
+    # should be a part of.
+    $finalPath = &findRelativeDoAmpPath();
+
+    if (!$finalPath) {
+        my $fail = 0;
+
+        # Use 'which' to search the users system for doAmplicon.
+        open(WH, "which doAmplicon 2>&1 |") or $fail = 1;
+        if (!$fail) {
+            while (defined(my $line = <WH>)) {
+                chomp($line);
+                if ($line =~ /doAmplicon$/) {
+                    my ($path) = ($line =~ /\s*(\S*doAmplicon)$/);
+                    my $pVer = 0;
+                    ($path, $pVer) = &verifyDoAmp($path);
+                    if ($path) {
+                        $finalPath = $path;
+                        last;
+                    }
+                }
+            }
+            close(WH);
+        }
+
+        if (!$finalPath) {
+
+            # Do another search using a set of preferred expected paths.
+            my %seenDoAmps      = ();
+            my @binaries        = ();
+            my %doAmpsByVer     = ();
+            my $doAmpFoundCount = 0;
+
+            foreach my $dir (@preferredBinDirs) {
+                my $path = $dir . 'doAmplicon';
+
+                # Because some of the paths use wildcards, more than
+                # one path may be returned by the list command.
+
+                open(LS, "ls -1 $path 2>&1 |") or $fail = 1;
+                if (!$fail) {
+                    while (defined(my $line = <LS>)) {
+                        chomp($line);
+                        if ($line !~ /^ls:/
+                            && $line !~ /: No such file or directory/)
+                        {
+                            push(@binaries, $line)
+                              if (!exists($seenDoAmps{$line}));
+                            $seenDoAmps{$line} = 1;
+                        }
+                    }
+                    close(LS);
+                }
+            }
+
+            foreach my $binary (@binaries) {
+
+                # Verify the version of doAmplicon for each instance found.
+                my $bVer = 0;
+                ($binary, $bVer) = &verifyDoAmp($binary);
+                if ($binary) {
+                    push(@{ $doAmpsByVer{$bVer} }, $binary);
+                    $doAmpFoundCount++;
+                }
+            }
+
+            if ($doAmpFoundCount) {
+                my @vers     = (sort byVer (keys %doAmpsByVer));
+                my $verCount = scalar(@vers);
+                my $highVer  = $vers[$verCount - 1];
+                $finalPath = $doAmpsByVer{$highVer}->[0];
+                if ($doAmpFoundCount > 1) {
+                    push(
+                        @notes,
+                        join("\n",
+"An automatic scan returned $doAmpFoundCount instances of doAmplicon.",
+"The instance with the highest version, above $expectedVer, was chosen as",
+"indicated below.  You can specify a specific instance to use with the",
+"-doAmpliconPath (--dap) option.  The choices found were:")
+                    );
+                    foreach my $ver (@vers) {
+                        foreach my $doAmp (@{ $doAmpsByVer{$ver} }) {
+                            push(@notes, "$ver $doAmp");
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    # $finalPath will be an empty string if no valid version was found.
+    return ($finalPath);
+}
+
+sub findRelativeDoAmpPath {
+    
+    # Use the location of this script as a means to infer the location
+    # of the doAmplicon that is part of the same installation.
+    my $finalPath = "";
+    
+    # There is a possibility that doAmplicon might sit in the same
+    # directory as the script, if the script is in the ROOT/bin/
+    # directory as a symbolic link. Test that case first by replacing
+    # the name of this script in its path name with doAmplicon and
+    # attempting to verify that version of doAmplicon.
+    my $scriptDir = $0;
+    $scriptDir =~ s/${moduleName}$//;
+    my $scriptPath = $scriptDir . 'doAmplicon';
+    my $scriptVer  = 0;
+    ($scriptPath, $scriptVer) = &verifyDoAmp($scriptPath);
+    if (!$scriptPath) {
+	
+        # If the first attempt fails, the assumption is that this
+        # script is residing at ROOT/apps/addons/GTypeHLA/bin/.
+        my $absScriptPath = abs_path($0);
+        my $absScriptVer  = 0;
+        if ($absScriptPath =~ /\/apps\/addons\/GTypeHLA\/bin\/${moduleName}$/)
+        {
+            $absScriptPath =~
+		s/\/addons\/GTypeHLA\/bin\/${moduleName}$/\/amplicons\/bin\/doAmplicon/;
+            ($absScriptPath, $absScriptVer) = &verifyDoAmp($absScriptPath);
+            if ($absScriptPath) {
+                $finalPath = $absScriptPath;
+            }
+        }
+    } else {
+        $finalPath = $scriptPath;
+    }
+    return ($finalPath);
+}
+
+sub verifyDoAmp {
+
+    # Verify that a path to doAmplicon specifies
+    # the expected version of the program.
+    my ($inPath) = @_;
+    my $outPath  = "";
+    my $outVer   = "0";
+    if (-e $inPath) {
+        my $fail = 0;
+
+        # The "about" parameter (-a) of doAmplicon
+        # provides text that includes the version number.
+        open(AB, "$inPath -a 2>&1 |") or $fail = 1;
+        if (!$fail) {
+            while (defined(my $line = <AB>)) {
+                chomp($line);
+                if ($line =~ /^GS Amplicon Variant Analyzer/) {
+                    my $ver = "";
+                    if ($line =~ /Version/) {
+                        ($ver) = ($line =~ /,\s*Version\s*(\S+)/);
+                    } elsif ($line =~ /GS Amplicon Variant Analyzer,/) {
+                        ($ver) = ($line =~ /,\s*(\S+)/);
+                    }
+                    if ($ver ge $expectedVer) {
+                        $outPath = $inPath;
+                        $outVer  = $ver;
+                    }
+                    last;
+                }
+            }
+            close(AB);
+        }
+    }
+
+    # $outPath will be an empty string if the input
+    # path is invalid or of the incorrect version.
+    return ($outPath, $outVer);
+}
+
+sub byVer {
+    my $aString = $a;
+    my $bString = $b;
+    if ($aString =~ /\d+p\d+/) {
+        $aString =~ s/p/\.p/;
+    }
+    if ($bString =~ /\d+p\d+/) {
+        $bString =~ s/p/\.p/;
+    }
+    my @aFields = split(/\./, $aString);
+    my @bFields = split(/\./, $bString);
+    my $aFieldCount = scalar(@aFields);
+    my $bFieldCount = scalar(@bFields);
+    my $minFieldCount =
+      ($aFieldCount < $bFieldCount ? $aFieldCount : $bFieldCount);
+    my $lastFieldIndex = $minFieldCount - 1;
+
+    for (my $i = 0; $i < $minFieldCount; $i++) {
+        my $aVal = $aFields[$i];
+        my $bVal = $bFields[$i];
+        if ($aVal =~ /^\d+$/ && $bVal =~ /^\d+$/) {
+            if ($aVal != $bVal) {
+                return ($aVal <=> $bVal);
+            } elsif ($i == $lastFieldIndex) {
+                if ($aFieldCount != $bFieldCount) {
+                    return ($aFieldCount <=> $bFieldCount);
+                } else {
+                    return ($aVal <=> $bVal);
+                }
+            } else {
+                next;
+            }
+        } elsif ($aVal =~ /^p\d+/ && $bVal =~ /^p\d+/) {
+            my ($aPatch) = ($aVal =~ /p(\d+)/);
+            my ($bPatch) = ($bVal =~ /p(\d+)/);
+            if ($aPatch != $bPatch) {
+                return ($aPatch <=> $bPatch);
+            } elsif ($i == $lastFieldIndex) {
+                if ($aFieldCount != $bFieldCount) {
+                    return ($aFieldCount <=> $bFieldCount);
+                } else {
+                    return ($aVal cmp $bVal);
+                }
+            } else {
+                next;
+            }
+        } elsif ($aVal =~ /^p\d+/ && $bVal =~ /^\d+$/) {
+            return (0 <=> 1);
+        } elsif ($aVal =~ /^\d+$/ && $bVal =~ /^p\d+/) {
+            return (1 <=> 0);
+        } elsif ($aVal ne $bVal) {
+            return ($aVal cmp $bVal);
+        } elsif ($i == $lastFieldIndex) {
+            if ($aFieldCount != $bFieldCount) {
+                return ($aFieldCount <=> $bFieldCount);
+            } else {
+                return ($aVal cmp $bVal);
+            }
+        } else {
+            next;
+        }
+    }
+}
+
+sub checkAllowReadDataSupersets {
+
+    # Register if the allowMixedSFF option has been provided
+    # and set it to the appropriate binary value of 0 or 1.
+    if ($allowMixedSFF) {
+        $allowMixedSFF = 1;
+    } else {
+        $allowMixedSFF = 0;
+    }
+}
+
+sub checkAnalysisMode {
+
+    # AnalysisMode is optional and can currently be set to "CUSTOM" or
+    # "STANDARD", defaulting to "STANDARD" if not provided.
+    if ($analysisMode) {
+        $analysisMode = uc($analysisMode);
+        if (!exists($validModes{$analysisMode})) {
+            push(@problems, "The provided --analysisMode ($analysisMode) is not currently supported.");
+        }
+    } else {
+
+        # Default mode is standard.
+        $analysisMode = 'STANDARD';
+    }
+}
+
+sub validateRegionNumber {
+    my ($rNum) = @_;
+    $rNum = &leadingZeroPad($rNum,2);
+    if ($rNum > 16){
+	push(@problems,"Region $rNum is not valid.");
+    }
+    return($rNum);
+}
+
+sub checkAssayLayout {
+    my @entries = ();
+    # The $assayLayout can in some instances be a list. Whether the argument
+    # is a list or not, use the argument to populate the @entries array to
+    # simplify processing.
+    my @realAssays = ();
+    foreach my $assay (sort(keys %defaultAssayData)) {
+	next if ($assay eq 'NONE');
+	push(@realAssays,$assay);
+    }
+    if ($assayLayout) {
+	$assayLayout = uc($assayLayout);
+	$assayLayout =~ s/\s+//g;
+	if ($assayLayout =~ /;/) {
+	    @entries = split(/;/,$assayLayout);
+	} else {
+	    @entries = ($assayLayout);
+	}
+    } else {
+	# If no assay layout is provided, assume that all assays should be 
+	# run in all regions.
+	@entries = @realAssays;
+    }
+    foreach my $entry (@entries) {
+	if ($entry =~ /=/) {
+	    # The entry assigns specific regions to specific assays.
+	    # Parse the entry.
+	    if ($entry =~ /[-,\d]+=[_A-Z]+/) {
+		my ($regCode,$assayName) = split(/=/,$entry);
+		if (!exists($defaultAssayData{$assayName})) {
+		    push(@problems,"The --assayLayout code ($entry) contains an unsupported assay name ($assayName).");
+		} else {
+		    my @regCodes = ();
+		    if ($regCode =~ /,/) {
+			@regCodes = split(/,/,$regCode);
+		    } elsif ($regCode =~ /^\d+$/ || $regCode =~ /^\d+-\d+$/) {
+			@regCodes = ($regCode);
+		    } else {
+			push(@problems,"The --assayLayout code ($entry) contains an invalid region specifier ($regCode).");
+		    }
+		    my %regNums = ();
+		    foreach my $rCode (@regCodes) {
+			if ($rCode =~ /\-/) {
+			    my ($start,$end) = split(/-/,$rCode);
+			    for (my $rNum=$start;$rNum<=$end;$rNum++) {
+				$rNum = &validateRegionNumber($rNum);
+				$regNums{$rNum} = 1;
+				#print STDERR "regionRecord $rNum\n";
+			    }
+			} else {
+			    $rCode = &validateRegionNumber($rCode);
+			    $regNums{$rCode} = 1;
+			    #print STDERR "regionRecord $rCode\n";
+			}
+		    }
+		    my %unusedRegNums = %regNums;
+		    foreach my $rdFile (@rdFiles) {
+			my ($reg) = ($rdFile =~ /(\d\d)$/);
+			#print STDERR "regionCheck $reg\n";
+			if (exists($regNums{$reg})) {
+			    delete($unusedRegNums{$reg});
+			    $rdAssayMap{$rdFile}{$assayName} = 1;
+			    $requiredAssays{$assayName} = 1 if ($assayName ne 'NONE');
+			}
+		    }
+		    my @uRegNums = (sort (keys %unusedRegNums));
+		    if (@uRegNums) {
+			my $urnLabel = join(", ",@uRegNums);
+			push(@problems,"Some of the region numbers provided ($urnLabel) do not match existing read data files.");
+		    }
+		}
+	    } else {
+		push(@problems,"The --assayLayout code ($entry) is not formatted properly.");
+	    }	    
+	} elsif (exists($defaultAssayData{$entry})) {
+	    # The entry is just an assay type without any specific region 
+	    # assignment. First check that the assay type is valid, then 
+	    # assign it to every read data file.
+	    if ($entry ne 'NONE') {
+		foreach my $rdFile (@rdFiles) {
+		    $rdAssayMap{$rdFile}{$entry} = 1;
+		    $requiredAssays{$entry} = 1;
+		}
+	    } else {
+		push(@problems,"The assay 'NONE' can not be applied to the whole set of SFF files since it implies that there is no work to be done at all.");
+	    }
+	} else {
+	    # The entry is not a region=assay pair and is not registered
+	    # as the name of a known assay handled by this script, so 
+	    # report it as an error.
+	    push(@problems,"The --assayLayout code ($entry) is not valid.");
+	}
+    }
+    # If only a partial list of region=assay codes has been provided, 
+    # measure all assays for read data files for which no assay has 
+    # been specified.
+    my @realRd = ();
+    foreach my $rdFile (@rdFiles) {
+	if (!exists($rdAssayMap{$rdFile})) {
+	    #print STDERR "unassigned RD $rdFile\n";
+	    foreach my $assay (@realAssays) {
+		$rdAssayMap{$rdFile}{$assay} = 1;
+		$requiredAssays{$assay} = 1;
+	    }
+	    push(@realRd,$rdFile);
+	} else {
+	    my @assignedAssays = (sort(keys %{$rdAssayMap{$rdFile}}));
+	    my $assayCount = scalar(@assignedAssays);
+	    if ($assayCount == 1) {
+		if (!exists($rdAssayMap{$rdFile}{'NONE'})) {
+		    push(@realRd,$rdFile);  
+		} 
+	    } elsif ($assayCount > 1) {
+		if (exists($rdAssayMap{$rdFile}{'NONE'})) {
+		    push(@problems,"The assay type 'NONE' can not be combined with other assays in the same region. The region is either being assigned one or more assays or it isn't.");
+		} else {
+		    push(@realRd,$rdFile);
+		}
+	    }
+	}
+    }
+    if (!@realRd) {
+	push(@problems,"No regions have been assigned valid assays.");
+    } else {
+	# Replace the full read data set with the set
+	# not excluded by intentional 'NONE' designations.
+	@rdFiles = @realRd;
+    }
+}
+
+sub checkIncludedMidList {
+    if ($includedMidList) {
+        if ($analysisMode eq 'CUSTOM') {
+            $includedMidList =~ s/,\s*/,/g;
+            $includedMidList =~ s/,and\s+//g;
+            $includedMidList =~ s/[\'\"]+//g;
+            $includedMidList =~ s/\s*\-\s*/\-/g;
+            my @elements = split(/,/, $includedMidList);
+            if (@elements) {
+                foreach my $element (@elements) {
+                    if ($element =~ /^\d+$/) {
+                        $midInclusionSet{"Mid${element}"} = 1;
+                    } elsif ($element =~ /^\d+\-\d+$/) {
+                        my ($start, $end) = ($element =~ /^(\d+)\-(\d+)$/);
+                        for (my $i = $start; $i <= $end; $i++) {
+                            $midInclusionSet{"Mid${i}"} = 1;
+                        }
+                    } elsif ($element =~ /[xX]/) {
+                        $xSamplesEnabled = 1;
+                    } else {
+                        push(@problems, "Invalid element '$element' in --iml list.");
+                    }
+                }
+            } else {
+                push(@problems, "No valid MID numbers provided with the --iml option.");
+            }
+        } else {
+            push(@problems, "The --iml option is not supported for 'standard' analysisMode.");
+        }
+    }
+}
+
+sub checkUniversalTails {
+    
+    # Net result is that $fourPrimerUniversalTails gets set to
+    # 0, DEFAULT, or CUSTOM, and if CUSTOM is set, specific tail sequences
+    # get assigned to $providedForwardUniversalTail and
+    # $providedReverseUniversalTail.
+    if ($fourPrimerUniversalTails) {
+        $fourPrimerUniversalTails = uc($fourPrimerUniversalTails);
+        if ($fourPrimerUniversalTails =~ /,/) {
+            $fourPrimerUniversalTails =~ s/[\'\"]+//g;
+            $fourPrimerUniversalTails =~ s/\s+//g;
+            my ($tail1, $tail2) = split(/,/, $fourPrimerUniversalTails);
+            $fourPrimerUniversalTails = 'CUSTOM';
+            if ($tail1 !~ /^[ATCGN]+$/) {
+                push(@problems, "The forward universal tail provided via --fput '$tail1' contains invalid characters.");
+            } else {
+                $providedForwardUniversalTail = $tail1;
+            }
+            if ($tail2 !~ /^[ATCGN]+$/) {
+                push(@problems, "The reverse universal tail provided via --fput '$tail2' contains invalid characters.");
+            } else {
+                $providedReverseUniversalTail = $tail2;
+            }
+        } elsif (!exists($validUniversalTails{$fourPrimerUniversalTails})) {
+            push(@problems, "The keyword '$fourPrimerUniversalTails' is not supported by the --fput option. ");
+        } else {
+            ($providedForwardUniversalTail, $providedReverseUniversalTail) =
+		@{$validUniversalTails{$fourPrimerUniversalTails}};
+	    if ($fourPrimerUniversalTails eq 'NONE') {
+		$fourPrimerUniversalTails = 0;
+	    }
+        }
+    } else {
+        # If not mentioned, the assumption is that universal tails
+        # are not being used.
+        $fourPrimerUniversalTails = 0;
+    }
+}
+
+sub checkOverwriteFlag {
+    
+    # Register if the overwriteEnabled option has been provided
+    # and set it to the appropriate binary value of 0 or 1.
+    if ($overwriteEnabled) {
+        $overwriteEnabled = 1;
+    } else {
+        $overwriteEnabled = 0;
+    }
+}
+
+sub checkHelpFlag {
+
+    # Register if the help option has been provided
+    # and set it to the appropriate binary value of 0 or 1.
+    if ($showHelp) {
+        $showHelp = 1;
+        if ($hasOpt == 1) {
+            &basicHelp();
+            exit(0);
+        } else {
+            push(@problems,
+                "The option --help should not be combined with other options."
+            );
+        }
+    } else {
+        $showHelp = 0;
+    }
+}
+
+sub checkAdvancedHelpFlag {
+
+    # Register if the advancedHelp option has been provided
+    # and set it to the appropriate binary value of 0 or 1.
+    if ($showAdvancedHelp) {
+        $showAdvancedHelp = 1;
+        if ($hasOpt == 1) {
+            &advancedHelp();
+            exit(0);
+        } else {
+            push(@problems,
+"The option --advancedHelp should not be combined with other options."
+            );
+        }
+    } else {
+        $showAdvancedHelp = 0;
+    }
+}
+
+sub validateActions {
+    &validateSetupAction();
+    &validateComputeAction();
+    &validateReportAction();
+}
+
+sub checkActions {
+
+    # Handle the user input regarding the action flags.
+
+    # Setup binary integer values for the action flag parameters.
+    $setup   = ($setup   ? 1 : 0);
+    $compute = ($compute ? 1 : 0);
+    $report  = ($report  ? 1 : 0);
+
+    # Check the logic of the user provided action flag combination. The setup-
+    # report pair is invalid (compute must be included in that situation
+    # because a newly setup project needs to be computed before it
+    # can be reported).
+    if (!$setup && !$compute && !$report) {
+
+        # No action flags have been provided. Assume that the user wants to
+        # run the script with a more compact command line and expects all
+        # actions to be performed.
+        $setup   = 1;
+        $compute = 1;
+        $report  = 1;
+    } elsif ($setup && $report && !$compute) {
+        push(@problems,
+"The setup flag indicates that a new project is being started. The report flag requires a computed project as input. Either include the compute flag or choose just the setup or the report flag."
+        );
+    }
+}
+
+sub validateSetupAction {
+
+    # Make sure it is safe to run project setup given the supplied parameters.
+    if ($setup) {
+        if (-e $projectDir) {
+
+            # Setup will not overwrite an existing AVA project unless
+            # the user explicitly provides the overwriteEnabled flag.
+            if (!$overwriteEnabled) {
+                push(@problems,
+"The --setup flag has been used and the --projectDir (-pd $projectDir) already exists. Choose another project name or use the --overwriteEnabled flag (--oe)."
+                );
+            }
+        }
+    }
+}
+
+sub validateComputeAction {
+
+    # Make sure it is safe to run computation given the supplied parameters.
+    if ($compute) {
+        if (!$setup) {
+
+            # If the setup action has not been provided, computation
+            # expects that a valid AVA project already exists.
+            &validateProjectDirectory();
+        }
+    }
+}
+
+sub validateReportAction {
+
+    # Make sure it is safe to run reporting given the supplied parameters.
+    if ($report) {
+        if ($reportVariants) {
+            if ($reportFile && -e $reportFile) {
+
+                # Check to see if a report already exists and
+                # if there is permission to overwrite it.
+                if (!$overwriteEnabled) {
+                    push(@problems,
+"A report file ($reportFile) for this --projectDir (--pd $projectDir) already exists. Use the --overwriteEnabled flag (--oe) to  force a regeneration of the report."
+                    );
+                }
+            }
+        }
+       
+        if (!$setup) {
+
+            # If the setup action has not been provided, computation
+            # expects that a valid AVA project already exists.
+            if (-d $projectDir) {
+                &validateProjectDirectory();
+            }
+
+            # If the compute action has not been provided, check to
+            # see that there is evidence that the project has already
+            # been computed before allowing reporting.
+            if (!$compute) {
+                &validateComputation();
+            }
+        }
+    }
+}
+
+sub validateComputation {
+
+    # Dig into the internal files of the project to make sure
+    # that the last computation of the project was successful.
+    my $compFile =
+      $projectDir . '/Amplicons/Compute/finalComputationStatus.txt';
+    if (!-e $compFile) {
+        push(@problems,
+"The computation status file ($compFile) for the project does not exist. Try including the compute flag to force a project computation."
+        );
+    } else {
+        my $compDone     = 1;
+        my @compLogLines = ();
+        open(CF, "<$compFile")
+          or &logDie("Unable to read computation status file ($compFile).");
+        while (defined(my $line = <CF>)) {
+            chomp($line);
+            push(@compLogLines, $line);
+            if ($line =~ /^RootStatus/) {
+                if ($line !~ /Done\s*-\s*OK/) {
+                    $compDone = 0;
+                }
+            } elsif ($line =~ /^NotOK/) {
+                my ($notOkNum) = ($line =~ /^NotOK\s+(\d+)/);
+                if ($notOkNum) {
+                    $compDone = 0;
+                }
+            }
+        }
+        close(CF);
+        if (!$compDone) {
+            my $msg = "The last computation did not complete successfully."
+              . (
+                !$compute
+                ? " Try including the compute flag to force a project recomputation. "
+                : " "
+              ) . "The log below may provide useful in troubleshooting.";
+            push(@problems, ($msg, @compLogLines));
+        }
+    }
+}
+
+sub checkDataLocation {
+
+    # Process the user parameters related to data location.
+
+    # Register the location parameter values and make a note
+    # in @problems if the data can't be found
+    &registerDataLocation();
+    if ($setup) {
+
+        # It is only important to further vet the location parameters
+        # for the setup phase; computation and/or reporting in the
+        # absence of a setup flag uses a pre-existing project.
+
+        # Any error messages in @problems related to the lack of
+        # dataDir or sffDir has already been taken care of by
+        # &registerDataLocation, so just return if neither is set
+        return if (!$dataDir && !$sffDir);
+
+        # Use the input parameters to construct a path to
+        # the directory containing the Read Data.
+        my $readDataPath = &resolveDataLocation();
+
+        if ($readDataPath) {
+            my %sRegions = ();
+
+            # Register the Read Data by prefix and region.
+            &registerReadData($readDataPath, \%sRegions);
+
+            my @sPrefixes = (sort(keys %sRegions));
+            my $sPreCount = scalar(@sPrefixes);
+
+            if (!$sPreCount) {
+
+                # Make sure the directory contains SFF files.
+                push(@problems,
+"The specified area for the readData ($readDataPath) does not contain any SFF files."
+                );
+            } elsif ($sPreCount > 1) {
+
+                # The SFF files do not all come from a single run
+                # (via a shared SFF file prefix).
+                if (!$allowMixedSFF) {
+
+                    # In a regular run all read data should share a prefix.
+                    push(@problems,
+"ReadData from more than one run are in the same directory. This script only handles setting up a project with input from a single run."
+                    );
+                } else {
+
+                    # If the read data from multiple runs are artificially
+                    # collected into a directory they can be processed within
+                    # the same AVA project if the $allowMixedSFF
+                    # flag is set.
+                    foreach my $sPre (@sPrefixes) {
+                        my @regions =
+                          (sort {$a <=> $b} (keys %{ $sRegions{$sPre} }));
+                        foreach my $region (@regions) {
+                            my $rdFile = $sPre . $region;
+                            push(@rdFiles, $rdFile);
+                        }
+                    }
+                    $rdPath = $readDataPath;
+                }
+            } else {
+
+                # The SFF files are from the same run. Make sure
+                # the expected number of regions is represented.
+                my $sPrefix = $sPrefixes[0];
+                my @regions =
+                  (sort {$a <=> $b} (keys %{ $sRegions{$sPrefix} }));
+		# Compared to older similar scripts, the call to
+		# &getFinalRdSet has been removed to get rid of the 
+		# restriction that all regions must be present 
+		# without any gaps.
+		foreach my $region (@regions) {
+		    my $rdFile = $sPrefix . $region;
+		    push(@rdFiles, $rdFile);
+		}
+                $rdPath = $readDataPath;
+            }
+        } else {
+            push(@problems,
+"Unable to resolve the read data location from the input parameters\n(--dd, or --sd) or the current working directory."
+            );
+        }
+    }
+}
+
+sub registerDataLocation {
+
+    # Register the user settings for the data location.
+    &checkDataDir();
+    &checkSffDir();
+
+    # Make sure only one type of location has been provided.
+    if ($dataDir && $sffDir) {
+        push(@problems,
+"Only one method of providing the location of the readData (SFF files) can be used at a time. Use the --dataDir (--dd) or --sffDir (--sd) parameters to indicate where the read data for the project can be obtained."
+        );
+    } elsif (!$dataDir && !$sffDir) {
+        push(@problems, &getNeedToSupplyReadDataMessage());
+    }
+}
+
+sub getNeedToSupplyReadDataMessage {
+    return join("\n",
+"You must specify the input SFF files using either the --dataDir (--dd) or",
+        "--sffDir (--sd) options on the command line.");
+
+}
+
+sub checkDataDir {
+
+    # Check that the provided data dir exists.
+    if ($dataDir) {
+        $dataDir = &slashTerminateDir($dataDir);
+        if (!-d $dataDir) {
+            push(@problems,
+                "--dataDir (--dd) provided ($dataDir) is not a directory.");
+        }
+    }
+}
+
+sub checkSffDir {
+
+    # Check that the provided SFF dir exists.
+    if ($sffDir) {
+        $sffDir = &slashTerminateDir($sffDir);
+        if (!-d $sffDir) {
+            push(@problems,
+                "--sff (--sd) provided ($sffDir) is not a directory.");
+        }
+    }
+}
+
+sub resolveDataLocation {
+
+    # Used the location provided by the user to construct
+    # a path to the directory containing the SFF files.
+    my $readDataPath = "";
+    if ($dataDir) {
+        $readDataPath = &getSffDirFromDataDir($dataDir);
+    } elsif ($sffDir) {
+        if (-d $sffDir) {
+            $readDataPath = $sffDir;
+        }
+    }
+    return ($readDataPath);
+}
+
+sub getSffDirFromDataDir {
+
+    # Use the structure of the data directory
+    # to construct a path to the SFF files.
+    my ($dataDir)    = @_;
+    my $readDataPath = "";
+    my $sPath        = $dataDir . 'sff/';
+    if (!-d $sPath) {
+        push(@problems,
+"The SFF subdirectory is missing from the --dataDir (--dd $dataDir).  Specify an alternate data directory, or use the --sd parameter to specify the directory containing the SFF Files."
+        );
+    } else {
+        $readDataPath = $sPath;
+    }
+    return ($readDataPath);
+}
+
+sub registerReadData {
+
+    # Given a path containing Read Data, catalog the
+    # SFF files by their prefix and region.
+    my ($readDataPath, $sRegionsRef) = @_;
+    my @sffFiles = `ls -1 $readDataPath`;
+
+    foreach my $sFile (@sffFiles) {
+        chomp($sFile);
+        if ($sFile =~ /\.sff$/) {
+            $sFile =~ s/\.sff$//;
+            if (my ($sPre, $reg) = ($sFile =~ /^(.+)(\d\d)$/)) {
+
+                # Only consider SFF files that are in the correct format
+                # (i.e., end with two digits representing the region)
+                $sRegionsRef->{$sPre}{$reg} = 1;
+            }
+        }
+    }
+}
+
+sub checkGsAmp {
+
+    # Make sure that there is a corresponding gsAmplicon for
+    # the doAmplicon so the user can view the data via the GUI.
+    $gsAmpPath = $doAmpPath;
+    $gsAmpPath =~ s/doAmplicon$/gsAmplicon/;
+    if (!-e $gsAmpPath) {
+        push(@problems,
+"Unable to find a gsAmplicon binary in the same directory as the doAmplicon binary ($doAmpPath)"
+        );
+    }
+}
+sub checkSffinfo {
+
+    # Make sure that there is a corresponding sffinfo for
+    # the doAmplicon so the SFF files can be converted to FASTA files.
+    $sffinfoPath = $doAmpPath;
+    $sffinfoPath =~ s/doAmplicon$/sffinfo/;
+    if (!-e $sffinfoPath) {
+        push(@problems,
+"Unable to find an sffinfo binary in the same directory as the doAmplicon binary ($doAmpPath)"
+        );
+    }
+}
+
+sub checkLog {
+
+    # Attempt to open up a log file and set the $logFH if successful.
+    if ($logFile) {
+
+        # The logFile gets written within the $outputDir. In some instances
+        # this involves an E-dir subdirectory that hasn't been created yet.
+        # Since writing the log isn't an optional exercise, and because the
+        # log check only occurs when the rest of the command line has
+        # survived its vetting, this seems like the place to instantiate
+        # the full $outputDir if necessary.
+
+        if ($outputDirParent && !-e $outputDirParent) {
+            &executeLinuxCmdAndTrapErrors("mkdir $outputDirParent");
+        }
+        if (!-e $outputDir) {
+            &executeLinuxCmdAndTrapErrors("mkdir $outputDir");
+        }
+        if (!-e $outputDirFasta) {
+            &executeLinuxCmdAndTrapErrors("mkdir $outputDirFasta");
+        }
+        my $fail        = 0;
+        my $versionLine = "Version: " . &getVersionString() . "\n";
+        my $command     = "Command: $commandLine\n";
+        my $inputLine   = "Input data: $rdPath\n";
+        my $outLine     = "Output: $outputDir\n";
+        my $utForwardLine =
+          "Forward Universal Tail: $providedForwardUniversalTail\n";
+        my $utReverseLine =
+          "Reverse Universal Tail: $providedReverseUniversalTail\n";
+
+        open(LF, ">$logFile") or $fail = 1;
+        if (!$fail) {
+            $logFH = \*LF;
+            autoflush $logFH 1;
+        }
+        &logLine($versionLine);
+        &logLine($command);
+        &logLine($inputLine);
+        &logLine($outLine);
+        if ($fourPrimerUniversalTails) {
+            &logLine($utForwardLine);
+            &logLine($utReverseLine);
+        }
+        &logLine("\n$ruoMsg\n");
+        if ($fail) {
+            &logLine("Unable to write to log file '$logFile'.");
+        }
+    }
+}
+
+sub getLogMsgPrefix {
+    my ($status) = @_;
+    my ($sec, $min, $hour, $mday, $mon, $year, $wday, $yday, $isdst) =
+      localtime(time);
+    $year += 1900;
+    $mon  = &leadingZeroPad($mon,  2);
+    $mday = &leadingZeroPad($mday, 2);
+    $hour = &leadingZeroPad($hour, 2);
+    $min  = &leadingZeroPad($min,  2);
+    $sec  = &leadingZeroPad($sec,  2);
+    my $day = ('Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat')[$wday];
+    my $month = (
+        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    )[$mon];
+
+    #[Wed Oct 27 19:29:12 2010][Warning][MetricsGenerator]
+    my $prefix =
+      "[$day $month $mday $hour:$min:$sec $year][$status][$moduleName] ";
+}
+
+sub logLine {
+
+    # Log a line to both STDERR and the $logFH if it is being used.
+    my ($line, $status) = @_;
+    if (!$status) {
+        $status = 'Information';
+    }
+    &checkLogStatus($status);
+    if (
+        $fromPipeline
+        && ($status eq 'Warning'
+            || $status eq 'Error'
+            || $status eq 'Critical'
+            || $status eq 'Fatal')
+      )
+    {
+
+        # In fromPipeline mode, negative messages of Warning
+        # class or worse go to STDERR.
+        print STDERR $line;
+    } elsif ($verbose || ($status ne 'Debug' && $status ne 'Trace')) {
+
+        # In fromPipeline mode, positive messages of class
+        # Notice or more detailed go to STDOUT. If verbose
+        # mode is not turned on, Debug and Trace class
+        # messages get skipped. In non-pipeline mode, all
+        # messages, positive or negative, not screened out
+        # by verbose mode being off get sent to STDOUT.
+        print STDOUT $line;
+    }
+    if ($logFH
+        && ($verbose || ($status ne 'Debug' && $status ne 'Trace')))
+    {
+
+        # In the actual log file (as opposed to the STDOUT/STDERR streams),
+        # the messages get tagged in a manner similar to syslog.Debug and
+        # Trace class messages are not printed to the file unless verbose
+        # mode is turned on.
+        my $msgPrefix          = &getLogMsgPrefix($status);
+        my $hasTerminalNewline = ($line =~ /\n$/ ? 1 : 0);
+        my $termNewLineCount   = 0;
+        if ($hasTerminalNewline) {
+            my ($termNewLineString) = ($line =~ /(\n+)$/);
+            my @newLines = split("", $termNewLineString);
+            $termNewLineCount = scalar(@newLines);
+        }
+        my @splitLines = split("\n", $line);
+        for (my $nl = 1; $nl < $termNewLineCount; $nl++) {
+            push(@splitLines, "");
+        }
+        my $sLineCount   = scalar(@splitLines);
+        my $sLineCounter = 0;
+        foreach my $sLine (@splitLines) {
+            $sLineCounter++;
+            print $logFH "${msgPrefix}${sLine}";
+            if ($hasTerminalNewline || $sLineCounter < $sLineCount) {
+                print $logFH "\n";
+            }
+        }
+    }
+}
+
+sub logFileHandle {
+
+    # Given an open file handle, log its lines of
+    # input to both STDERR and the log file.
+    my ($inFH, $status) = @_;
+    if (!$status) {
+        $status = 'Debug';
+    }
+    while (defined(my $line = <$inFH>)) {
+        &logLine($line, $status);
+    }
+}
+
+sub logDie {
+
+    # Log messages to both STDERR and the log file
+    # prior to exiting with a non-zero return code.
+    my ($line, $status) = @_;
+    if (!$status) {
+        $status = 'Error';
+    }
+    &logLine($line, $status);
+    exit(1);
+}
+
+sub checkLogStatus {
+    my ($status) = @_;
+    if (!exists($validLogClasses{$status})) {
+        &logLine("Unknown log class '$status'\n", 'Warning');
+    }
+}
+
+sub executeActionIfNeeded {
+
+    # For a given input action, carry ot the action if it has
+    # been supplied as a command line action flag parameter.
+    my ($action) = @_;
+
+    # For the input action, determine the binary
+    # value of its action flag parameter.
+    my $actionVal = (
+        $action eq 'setup' ? $setup
+        : (
+            $action eq 'compute' ? $compute
+            : ($action eq 'report' ? $report : undef)
+          )
+    );
+    if ($actionVal) {
+
+        # Only continue executing the action if the binary action value is 1.
+        my $projectActionFile = $projectDir . ".${action}Script.cli.txt";
+
+        # Verify that the CLI script for the action already
+        # exists and only continue if the overwriting is enabled.
+        &logDie(
+"The project $action script '$projectActionFile' already exists. Use the --overwriteEnabled flag if you are willing to replace it with a new file.\n\n"
+        ) if (!$overwriteEnabled && -e $projectActionFile);
+        if ($action eq 'setup' && -e $projectDir && $overwriteEnabled) {
+
+            # If setup is being executed and the AVA project
+            # already exists, remove the existing project if
+            # overwriting is enabled.
+            &executeLinuxCmdAndTrapErrors("rm -rf $projectDir");
+        }
+
+	# The 'report' option via the CLI is deactivated here because we are 
+        # not providing any predefined experiment variants beyond the marker 
+	# variants so a variant hit report isn't terribly useful. Deactivation
+	# was chosen instead of refactoring the code to leave open the 
+	# possibility of providing a meaningful report in the future. 
+	if ($action ne 'report') {
+	    # Write out the CLI script for the action.
+	    open(AS, ">$projectActionFile")
+		or &logDie(
+			   "Unable to write to project $action file '$projectActionFile'.\n\n"
+			   );
+	    my $asFh = \*AS;
+	    &logLine("Generating project $action script '$projectActionFile'.\n");
+	    if ($action eq 'setup') {
+		&printSetupFile($asFh, $projName, $rdPath, \@rdFiles);
+	    } elsif ($action eq 'compute') {
+		&printCompFile($asFh);
+	    } elsif ($action eq 'report') {
+		&printReportFile($asFh);
+	    }
+	    close(AS);
+	    
+	    # Execute the CLI script using doAmplicon in verbose mode.
+	    &logLine("Executing project $action script '$projectActionFile'.\n");
+	    &logLine(
+		     "This may take a while depending on the volume of data. Do not terminate this script. You may follow the computation status in more detail by opening the AVA project ($projectDir) using the AVA GUI ($gsAmpPath). If you steal control of the project using the AVA GUI, be sure not to terminate the computation or alter the project until this script has generated your report.\n"
+		     ) if ($action eq 'compute');
+	    
+	    &executeLinuxCmdAndTrapErrors(
+					  "$doAmpPath --cpu $cpu -v $projectActionFile");
+	    my $actionFailed = 0;
+	    if ($action eq 'compute') {
+		&validateComputation();
+		if (@problems) {
+		    my $errLine = "\n\nExecution Problems:\n\n"
+			. join("\n", @problems) . "\n\n";
+		    &logLine($errLine);
+		    $actionFailed = 1;
+		}
+	    }
+	    if ($actionFailed) {
+		&logDie(
+			"Terminating because running project $action script '$projectActionFile' failed.\n"
+			);
+	    } else {
+		&logLine(
+			 "Successful completion of project $action script '$projectActionFile'.\n"
+			 );
+		unlink($projectActionFile);
+	    }
+	}
+	if ($action eq 'report') {
+	    # Convert the project sff files to fasta files.
+	    &convertSffToFasta();
+	}
+    }
+}
+
+sub executeLinuxCmdAndTrapErrors {
+    my ($lCmd) = @_;
+    &logLine("Executing command '$lCmd'.\n", "Debug");
+    open(CMD, "$lCmd 2>& 1 |")
+	or &logDie("Problem executing '$lCmd'.\n\n");
+    &logFileHandle(\*CMD);
+    close(CMD)
+	or &logDie("Problem executing '$lCmd'.\n\n");
+}
+
+sub convertSffToFasta {
+    foreach my $rd (@rdFiles) {
+	my $sffFilePath = $rdPath . $rd . '.sff';
+	my $fastaOutFile = $outputDirFasta . '/' . $rd . '.fna';
+	&executeLinuxCmdAndTrapErrors("$sffinfoPath -s $sffFilePath > $fastaOutFile");
+    }
+}
+
+# NOTE: The subroutines below use here-document syntax to supply content
+# for AVA CLI scripts. Be careful not to introduce any whitespace before
+# or after the terminators.
+
+sub printSetupFile {
+    my ($fh, $projName, $rdPath, $rdFilesRef) = @_;
+    &printCreateProjCmd($fh, $projName);
+    &printCreateRefCmd($fh);
+    &printCreateAmpCmd($fh);
+    if ($reportVariants) {
+        &printCreateVariantCmd($fh);
+    }
+    &printCreateMIDsCmd($fh);
+    &printCreateSamplesCmd($fh);
+    &printCreateMultiplexerCmd($fh);
+    &printImportRdCmd($fh, $rdPath, $rdFilesRef);
+    &printRdMuxMidSampAmpAssoc($fh);
+    print $fh "save\n";
+}
+
+sub printCompFile {
+    my ($fh) = @_;
+    print $fh "open $projectDir -control preempt\ncomputation start\nclose\n";
+}
+
+sub printReportFile {
+    my ($fh) = @_;
+    print $fh "open $projectDir -control readOnly\n";
+    if ($reportVariants) {
+        print $fh "report variantHits -outputFile $reportFile\n";
+    }
+    print $fh "close\n";
+}
+
+sub printCreateProjCmd {
+    my ($fh, $projName) = @_;
+    print $fh "create project $projectDir -name $projName -annotation \"\"\n";
+}
+
+sub obtainReferenceData {
+    my @finalRefs = ();
+    my %defaultRefs =
+	('RUNX1' => 
+	 [['RUNX1_E03', 'GCTGTTTGCAGGGTCCTAACTCAATCGGCTTGTTGTGATGCGTATCCCCGTAGATGCCAGCACGAGCCGCCGCTTCACGCCGCCTTCCACCGCGCTGAGCCCAGGCAAGATGAGCGAGGCGTTGCCGCTGGGCGCCCCGGACGCCGGCGCTGCCCTGGCCGGCAAGCTGAGGAGCGGCGACCGCAGCATGGTGGAGGTGCTGGCCGACCACCCGGGCGAGCTGGTGCGCACCGACAGCCCCAACTTCCTCTGCTCCGTGCTGCCTACGCACTGGCGCTGCAACAAGACCCTGCCCATCGCTTTCAAGGTACTGGCCCGGAGAGGGTGGTGGGAGGACAGGCGGAGGCC'],
+	  ['RUNX1_E04', 'CATTGCTATTCCTCTGCAACCTAAAAAGAAATCATTGAATATACATTTAATTTTAGAATAATCACTACACAAATGCCCTAAAAGTGTATGTATAACATCCCTGATGTCTGCATTTGTCCTTTGACTGGTGTTTAGGTGGTGGCCCTAGGGGATGTTCCAGATGGCACTCTGGTCACTGTGATGGCTGGCAATGATGAAAACTACTCGGCTGAGCTGAGAAATGCTACCGCAGCCATGAAGAACCAGGTTGCAAGATTTAATGACCTCAGGTTTGTCGGTCGAAGTGGAAGAGGTACGTTATCTGTCAAAACTATGCTTGAAACACGTTTCATGGCAACAAAC'],
+	  ['RUNX1_E05', 'AAATTCCGGGAGTGTTGTCAAAACTGGTAACTTGTGCTGAAGGGCTGGACAGCATAAATTAATGATTGGTTATTCAACAGATATGTTCAGGCCACCAACCTCATTCTGTTTTGTTCTCTATCGTGTCCCCACAGGGAAAAGCTTCACTCTGACCATCACTGTCTTCACAAACCCACCGCAAGTCGCCACCTACCACAGAGCCATCAAAATCACAGTGGATGGGCCCCGAGAACCTCGAAGTAAGTGCATCCACTTGGGGCTGGTACACCCTCCAGGCTGGTACACCCTCCAGGCTGGTATACTCAGGGACCATGTCTCAGATTCCTTGGGTTCAACCTTTC'],
+	  ['RUNX1_E06', 'TGATCTCTTCCCTCCCTCCTTCCCTCCCCCCATCCCCTCCCCTCCCTGCTCCCCACAATAGGACATCGGCAGAAACTAGATGATCAGACCAAGCCCGGGAGCTTGTCCTTTTCCGAGCGGCTCAGTGAACTGGAGCAGCTGCGGCGCACAGCCATGAGGGTCAGCCCACACCACCCAGCCCCCACGCCCAACCCTCGTGCCTCCCTGAACCACTCCACTGCCTTTAACCCTCAGCCTCAGAGTCAGATGCAGGGTAAGTACCAGATGGAGCCCACTGCCCGCCTCTCCTGCACCTGGGCCACCACCCACAACTGGCCCCCATGTGCACACACCTTCCCAGACCAACTG'],
+	  ['RUNX1_E07', 'ATTTGAACAAGGGCCACTCATTTCTTATTAAAAGACATTTTTTAAATCCCACCCCACTTTACATATAATTGACCTTTCTGATTCTCTTCAGATACAAGGCAGATCCAACCATCCCCACCGTGGTCCTACGATCAGTCCTACCAATACCTGGGATCCATTGCCTCTCCTTCTGTGCACCCAGCAACGCCCATTTCACCTGGACGTGCCAGCGGCATGACAACCCTCTCTGCAGAACTTTCCAGTCGACTCTCAAGTAAGCCACTTGAAAACACATTCTTTGCAGCTGAGCTGGGGTGGAAGGTCCAGGAGACTAGAGGTGCATGAAGGAGTTGGCAGAACATT'],
+	  ['RUNX1_E08', 'CTCCGCAACCTCCTACTCACTTCCGCTCCGTTCTCTTGCCCGCCCTGCAGCGGCACCCGACCTGACAGCGTTCAGCGACCCGCGCCAGTTCCCCGCGCTGCCCTCCATCTCCGACCCCCGCATGCACTATCCAGGCGCCTTCACCTACTCCCCGACGCCGGTCACCTCGGGCATCGGCATCGGCATGTCGGCCATGGGCTCGGCCACGCGCTACCACACCTACCTGCCGCCGCCCTACCCCGGCTCGTCGCAAGCGCAGGGAGGCCCGTTCCAAGCCAGCTCGCCCTCCTACCACCTGTACTACGGCGCCTCGGCCGGCTCCTACCAGTTCTCCATGGTGGGCGGCGAGCGCTCGCCGCCGCGCATCCTGCCGCCCTGCACCAACGCCTCCACCGGCTCCGCGCTGCTCAACCCCAGCCTCCCGAACCAGAGCGACGTGGTGGAGGCCGAGGGCAGCCACAGCAACTCCCCCACCAACATGGCGCCCTCCGCGCGCCTGGAGGAGGCCGTGTGGAGGCCCTACTGAGGCGCCAGGCCTGGCCCGGCTGGGCCCCGCGGGCCGCCGCCTTCGCCTCCGGGCGCGCGGGCCTCCTGTTCGCGACAAGC']],
+	 'TET2_CBL_KRAS' => 
+	 [['CBL_E08', 'CCAGACTAGATGCTTTCTGGTTTAATAAAAAATAAACCACTGTTGTGACATTTTTATATAAGCAAAATTTGTATAGGAAACAAGTCTTCACTTTTTCTGTTAACATTTATAATTGCAGTTATTTATTCAACTAATAGTCTTTTAATTTTTTTTAATCAAAGGAACAATATGAATTATACTGTGAGATGGGCTCCACATTCCAACTATGTAAAATATGTGCTGAAAATGATAAGGATGTAAAGATTGAGCCCTGTGGACACCTCATGTGCACATCCTGTCTTACATCCTGGCAGGTACGGATCTAAACAGCGACTTTTTTCAGCTATGTAATAACCTTGGAAAATTCGG'],
+	  ['CBL_E09', 'GATGCATCTGTTACTATCTTTTGCTTCTTCTGCAGGAATCAGAAGGTCAGGGCTGTCCTTTCTGCCGATGTGAAATTAAAGGTACTGAACCCATCGTGGTAGATCCGTTTGATCCTAGAGGGAGTGGCAGCCTGTTGAGGCAAGGAGCAGAGGGAGCTCCCTCCCCAAATTATGATGATGATGATGATGAACGAGCTGATGATACTCTCTTCATGATGAAGGAATTGGCTGGTGCCAAGGTAAGATGGCAGTTTAGGAGACTGGCAAAATCCATTGTGAGTTGTCTTCTAAAGCCGTAAAACACTTAACGATATCCAAACTACAATGATAGG'],
+	  ['KRAS_E02', 'TTAACCTTATGTGTGACATGTTCTAATATAGTCACATTTTCATTATTTTTATTATAAGGCCTGCTGAAAATGACTGAATATAAACTTGTGGTAGTTGGAGCTGGTGGCGTAGGCAAGAGTGCCTTGACGATACAGCTAATTCAGAATCATTTTGTGGACGAATATGATCCAACAATAGAGGTAAATCTTGTTTTAATATGCATATTACTGGTGCAGGACCATTCTTTGATACAGATAAAGGTTTCTCTGACCATTTTCATGAGTACTTATTACAAGATAATTATGCTGAAAGTTAAGTTATCTGAAATGTACCTTGGGTTTCAAGTTATATGTAACCATTAATATGGGAACTTTACTTTC'],
+	  ['KRAS_E03', 'TGTAATAATCCAGACTGTGTTTCTCCCTTCTCAGGATTCCTACAGGAAGCAAGTAGTAATTGATGGAGAAACCTGTCTCTTGGATATTCTCGACACAGCAGGTCAAGAGGAGTACAGTGCAATGAGGGACCAGTACATGAGGACTGGGGAGGGCTTTCTTTGTGTATTTGCCATAAATAATACTAAATCATTTGAAGATATTCACCATTATAGGTGGGTTTAAATTGAATATAATAAGCTGACATTAAGGAGTAATTATAGTTTTTATTTTTTGAGTCTTTGCTAATGCCATGCATATAATATTTAATAAAAATTTTTAAATAATGTTTATGAGGTAGGTAATATCCCTG'],
+	  ['TET2_E03', 'ATTCAACTAGAGGGCAGCCTTGTGGATGGCCCCGAAGCAAGCCTGATGGAACAGGATAGAACCAACCATGTTGAGGGCAACAGACTAAGTCCATTCCTGATACCATCACCTCCCATTTGCCAGACAGAACCTCTGGCTACAAAGCTCCAGAATGGAAGCCCACTGCCTGAGAGAGCTCATCCAGAAGTAAATGGAGACACCAAGTGGCACTCTTTCAAAAGTTATTATGGAATACCCTGTATGAAGGGAAGCCAGAATAGTCGTGTGAGTCCTGACTTTACACAAGAAAGTAGAGGGTATTCCAAGTGTTTGCAAAATGGAGGAATAAAACGCACAGTTAGTGAACCTTCTCTCTCTGGGCTCCTTCAGATCAAGAAATTGAAACAAGACCAAAAGGCTAATGGAGAAAGACGTAACTTCGGGGTAAGCCAAGAAAGAAATCCAGGTGAAAGCAGTCAACCAAATGTCTCCGATTTGAGTGATAAGAAAGAATCTGTGAGTTCTGTAGCCCAAGAAAATGCAGTTAAAGATTTCACCAGTTTTTCAACACATAACTGCAGTGGGCCTGAAAATCCAGAGCTTCAGATTCTGAATGAGCAGGAGGGGAAAAGTGCTAATTACCATGACAAGAACATTGTATTACTTAAAAACAAGGCAGTGCTAATGCCTAATGGTGCTACAGTTTCTGCCTCTTCCGTGGAACACACACATGGTGAACTCCTGGAAAAAACACTGTCTCAATATTATCCAGATTGTGTTTCCATTGCGGTGCAGAAAACCACATCTCACATAAATGCCATTAACAGTCAGGCTACTAATGAGTTGTCCTGTGAGATCACTCACCCATCGCATACCTCAGGGCAGATCAATTCCGCACAGACCTCTAACTCTGAGCTGCCTCCAAAGCCAGCTGCAGTGGTGAGTGAGGCCTGTGATGCTGATGATGCTGATAATGCCAGTAAACTAGCTGCAATGCTAAATACCTGTTCCTTTCAGAAACCAGAACAACTACAACAACAAAAATCAGTTTTTGAGATATGCCCATCTCCTGCAGAAAATAACATCCAGGGAACCACAAAGCTAGCGTCTGGTGAAGAATTCTGTTCAGGTTCCAGCAGCAATTTGCAAGCTCCTGGTGGCAGCTCTGAACGGTATTTAAAACAAAATGAAATGAATGGTGCTTACTTCAAGCAAAGCTCAGTGTTCACTAAGGATTCCTTTTCTGCCACTACCACACCACCACCACCATCACAATTGCTTCTTTCTCCCCCTCCTCCTCTTCCACAGGTTCCTCAGCTTCCTTCAGAAGGAAAAAGCACTCTGAATGGTGGAGTTTTAGAAGAACACCACCACTACCCCAACCAAAGTAACACAACACTTTTAAGGGAAGTGAAAATAGAGGGTAAACCTGAGGCACCACCTTCCCAGAGTCCTAATCCATCTACACATGTATGCAGCCCTTCTCCGATGCTTTCTGAAAGGCCTCAGAATAATTGTGTGAACAGGAATGACATACAGACTGCAGGGACAATGACTGTTCCATTGTGTTCTGAGAAAACAAGACCAATGTCAGAACACCTCAAGCATAACCCACCAATTTTTGGTAGCAGTGGAGAGCTACAGGACAACTGCCAGCAGTTGATGAGAAACAAAGAGCAAGAGATTCTGAAGGGTCGAGACAAGGAGCAAACACGAGATCTTGTGCCCCCAACACAGCACTATCTGAAACCAGGATGGATTGAATTGAAGGCCCCTCGTTTTCACCAAGCGGAATCCCATCTAAAACGTAATGAGGCATCACTGCCATCAATTCTTCAGTATCAACCCAATCTCTCCAATCAAATGACCTCCAAACAATACACTGGAAATTCCAACATGCCTGGGGGGCTCCCAAGGCAAGCTTACACCCAGAAAACAACACAGCTGGAGCACAAGTCACAAATGTACCAAGTTGAAATGAATCAAGGGCAGTCCCAAGGTACAGTGGACCAACATCTCCAGTTCCAAAAACCCTCACACCAGGTGCACTTCTCCAAAACAGACCATTTACCAAAAGCTCATGTGCAGTCACTGTGTGGCACTAGATTTCATTTTCAACAAAGAGCAGATTCCCAAACTGAAAAACTTATGTCCCCAGTGTTGAAACAGCACTTGAATCAACAGGCTTCAGAGACTGAGCCATTTTCAAACTCACACCTTTTGCAACATAAGCCTCATAAACAGGCAGCACAAACACAACCATCCCAGAGTTCACATCTCCCTCAAAACCAGCAACAGCAGCAAAAATTACAAATAAAGAATAAAGAGGAAATACTCCAGACTTTTCCTCACCCCCAAAGCAACAATGATCAGCAAAGAGAAGGATCATTCTTTGGCCAGACTAAAGTGGAAGAATGTTTTCATGGTGAAAATCAGTATTCAAAATCAAGCGAGTTCGAGACTCATAATGTCCAAATGGGACTGGAGGAAGTACAGAATATAAATCGTAGAAATTCCCCTTATAGTCAGACCATGAAATCAAGTGCATGCAAAATACAGGTTTCTTGTTCAAACAATACACACCTAGTTTCAGAGAATAAAGAACAGACTACACATCCTGAACTTTTTGCAGGAAACAAGACCCAAAACTTGCATCACATGCAATATTTTCCAAATAATGTGATCCCAAAGCAAGATCTTCTTCACAGGTGCTTTCAAGAACAGGAGCAGAAGTCACAACAAGCTTCAGTTCTACAGGGATATAAAAATAGAAACCAAGATATGTCTGGTCAACAAGCTGCGCAACTTGCTCAGCAAAGGTACTTGATACATAACCATGCAAATGTTTTTCCTGTGCCTGACCAGGGAGGAAGTCACACTCAGACCCCTCCCCAGAAGGACACTCAAAAGCATGCTGCTCTAAGGTGGCATCTCTTACAGAAGCAAGAACAGCAGCAAACACAGCAACCCCAAACTGAGTCTTGCCATAGTCAGATGCACAGGCCAATTAAGGTGGAACCTGGATGCAAGCCACATGCCTGTATGCACACAGCACCACCAGAAAACAAAACATGGAAAAAGGTAACTAAGCAAGAGAATCCACCTGCAAGCTGTGATAATGTGCAGCAAAAGAGCATCATTGAGACCATGGAGCAGCATCTGAAGCAGTTTCACGCCAAGTCGTTATTTGACCATAAGGCTCTTACTCTCAAATCACAGAAGCAAGTAAAAGTTGAAATGTCAGGGCCAGTCACAGTTTTGACTAGACAAACCACTGCTGCAGAACTTGATAGCCACACCCCAGCTTTAGAGCAGCAAACAACTTCTTCAGAAAAGACACCAACCAAAAGAACAGCTGCTTCTGTTCTCAATAATTTTATAGAGTCACCTTCCAAATTACTAGATACTCCTATAAAAAATTTATTGGATACACCTGTCAAGACTCAATATGATTTCCCATCTTGCAGATGTGTAGGTAAGTGCCAGAAATGTACTGAGACACATGGCGTTTATCCAGAATTAGCAAATTTATCTTCAGATATGGGATTTTCCTTCTTTTTTTAAATCTTGAGTCTGGCAGCAATTTGTAAAGGCTCATAAA'],
+	  ['TET2_E04', 'TGGCACATTTTCTAATAGATCAGTCCATCAATCTACTCATTTTAAAGAAAAAAAAATTTTAAAGTCACTTTTAGAGCCCTTAATGTGTAGTTGGGGGTTAAGCTTTGTGGATGTAGCCTTTATATTTAGTATAATTGAGGTCTAAAATAATAATCTTCTATTATCTCAACAGAGCAAATTATTGAAAAAGATGAAGGTCCTTTTTATACCCATCTAGGAGCAGGTCCTAATGTGGCAGCTATTAGAGAAATCATGGAAGAAAGGTAATTAACGCAAAGGCACAGGGCAGATTAACGTTTATCCTTTTGTATATGTCAGAATTTTTCCAGCCTTCACACACAAAG'],
+	  ['TET2_E05', 'AAACCGTTCATTTCTCAGGATGTGGTCATAGAATAAAGTTATGCTCAAATGTTCAAATATTTTGATTGCCTCTTGAATTCATTTGCTAATTGTATGTGTGTGTGTTTCTGTGGGTTTCTTTAAGGTTTGGACAGAAGGGTAAAGCTATTAGGATTGAAAGAGTCATCTATACTGGTAAAGAAGGCAAAAGTTCTCAGGGATGTCCTATTGCTAAGTGGGTAAGTGTGACTTGATAAAGCCTTTGGTCTTAAATCTTGGGCATTTTGATTTGTAAATCTGACCCTGAGAATTGGGTTACCCAGATCAAAGACTCATGCCAGTTAAAAAGAACATTAC'],
+	  ['TET2_E06', 'TGACCCTTGTTTTGTTTTGGTTGGGGTGGGGGGTGTTTGGGATGGAATGGTGATCCACGCAGGTGGTTCGCAGAAGCAGCAGTGAAGAGAAGCTACTGTGTTTGGTGCGGGAGCGAGCTGGCCACACCTGTGAGGCTGCAGTGATTGTGATTCTCATCCTGGTGTGGGAAGGAATCCCGCTGTCTCTGGCTGACAAACTCTACTCGGAGCTTACCGAGACGCTGAGGAAATACGGCACGCTCACCAATCGCCGGTGTGCCTTGAATGAAGAGTAAGTGAAGCCCAGGGCCTCTCCCCTCTTTGCGGCCACTGATAGGAAAGCCCAATCTTTGGTTGAAAGGAAGAGAGTTCAGCG'],
+	  ['TET2_E07', 'ATAGACACCTATAATATCAGCTGCACAGCCTATATAATGCTATCCATAGCAATGAATTTGGTCTTTTGATTTTTCAGGAGAACTTGCGCCTGTCAGGGGCTGGATCCAGAAACCTGTGGTGCCTCCTTCTCTTTTGGTTGTTCATGGAGCATGTACTACAATGGATGTAAGTTTGCCAGAAGCAAGATCCCAAGGAAGTTTAAGCTGCTTGGGGATGACCCAAAAGAGGTTTGTTTACTTCCTGATGTATAATCGCTTTATTTTTCATAGAGAATTCATTAGCTTAGATGAAGTGAACAATATGACATATCTTGGTAAGCTCTTATTAATCAAAGTTTTTCCCAAACTG'],
+	  ['TET2_E08', 'CCATATATTGTGTTTGGGATTCAAAATGTAAGGGGAATAATCTAACTGATAGTCTCTTTTACATAGAGAAAATGGACTTAGAATTTAATATGTAGAATTATTCACTTTATACAGGAAGAGAAACTGGAGTCTCATTTGCAAAACCTGTCCACTCTTATGGCACCAACATATAAGAAACTTGCACCTGATGCATATAATAATCAGGTAAGTTTAAATAATCATTGGCAGCAATTGTAACAACTTACTTGTTACTAATGACCTATGTCCAAAAATATTTTTGAAACAATGATTTTTAAATATTATTCTAACTTTTCCTCTTAATTGTTGAAACCACTGC'],
+	  ['TET2_E09', 'TGCTCTATTTTGTGTCATTCCATTTTGTTTCTGGATATATATTTAAGTTCAAAACATTTTTTTAAAGTTCTAAATGGTCTAAATACTAGTGAGTTTTCGGTGTAAGAGTAAAACTAACTACTTTCGCATTCACACACACTTTTATTTTTCAGATTGAATATGAACACAGAGCACCAGAGTGCCGTCTGGGTCTGAAGGAAGGCCGTCCATTCTCAGGGGTCACTGCATGTTTGGACTTCTGTGCTCATGCCCACAGAGACTTGCACAACATGCAGAATGGCAGCACATTGGTAAGTTGGGCTGAGGACAGCTTAGCAGCTGTTGAGTCTGTTCTCACACTG'],
+	  ['TET2_E10', 'GGGACCTGTAGTTGAGGCTGTAATGTCTTACTTCCCTACCAGGTATGCACTCTCACTAGAGAAGACAATCGAGAATTTGGAGGAAAACCTGAGGATGAGCAGCTTCACGTTCTGCCTTTATACAAAGTCTCTGACGTGGATGAGTTTGGGAGTGTGGAAGCTCAGGAGGAGAAAAAACGGAGTGGTGCCATTCAGGTACTGAGTTCTTTTCGGCGAAAAGTCAGGATGTTAGCAGAGCCAGTCAAGACTTGCCGACAAAGGAAACTAGAAGCCAAGAAAGCTGCAGCTGAAAAGCTTTCCTCCCTGGAGAACAGCTCAAATAAAAATGAAAAGGAAAAGTCAGCCCCATCACGTACAAAACAAACTGAAAACGCAAGCCAGGCTAAACAGTTGGCAGGTAAATTTAATGTAAAGCATTTGTAGATAAATGTGTTGTGTGGTATATTAAAAATGAAAATTATTTTGGTTTTGCCCCC'],
+	  ['TET2_E11', 'GCCTTCATAAAATAATCATCAACATCAAAGATACCTGTTTCTGTTCTCTCTTACCCTGTCCACAGAACTTTTGCGACTTTCAGGACCAGTCATGCAGCAGTCCCAGCAGCCCCAGCCTCTACAGAAGCAGCCACCACAGCCCCAGCAGCAGCAGAGACCCCAGCAGCAGCAGCCACATCACCCTCAGACAGAGTCTGTCAACTCTTATTCTGCTTCTGGATCCACCAATCCATACATGAGACGGCCCAATCCAGTTAGTCCTTATCCAAACTCTTCACACACTTCAGATATCTATGGAAGCACCAGCCCTATGAACTTCTATTCCACCTCATCTCAAGCTGCAGGTTCATATTTGAATTCTTCTAATCCCATGAACCCTTACCCTGGGCTTTTGAATCAGAATACCCAATATCCATCATATCAATGCAATGGAAACCTATCAGTGGACAACTGCTCCCCATATCTGGGTTCCTATTCTCCCCAGTCTCAGCCGATGGATCTGTATAGGTATCCAAGCCAAGACCCTCTGTCTAAGCTCAGTCTACCACCCATCCATACACTTTACCAGCCAAGGTTTGGAAATAGCCAGAGTTTTACATCTAAATACTTAGGTTATGGAAACCAAAATATGCAGGGAGATGGTTTCAGCAGTTGTACCATTAGACCAAATGTACATCATGTAGGGAAATTGCCTCCTTATCCCACTCATGAGATGGATGGCCACTTCATGGGAGCCACCTCTAGATTACCACCCAATCTGAGCAATCCAAACATGGACTATAAAAATGGTGAACATCATTCACCTTCTCACATAATCCATAACTACAGTGCAGCTCCGGGCATGTTCAACAGCTCTCTTCATGCCCTGCATCTCCAAAACAAGGAGAATGACATGCTTTCCCACACAGCTAATGGGTTATCAAAGATGCTTCCAGCTCTTAACCATGATAGAACTGCTTGTGTCCAAGGAGGCTTACACAAATTAAGTGATGCTAATGGTCAGGAAAAGCAGCCATTGGCACTAGTCCAGGGTGTGGCTTCTGGTGCAGAGGACAACGATGAGGTCTGGTCAGACAGCGAGCAGAGCTTTCTGGATCCTGACATTGGGGGAGTGGCCGTGGCTCCAACTCATGGGTCAATTCTCATTGAGTGTGCAAAGCGTGAGCTGCATGCCACAACCCCTTTAAAGAATCCCAATAGGAATCACCCCACCAGGATCTCCCTCGTCTTTTACCAGCATAAGAGCATGAATGAGCCAAAACATGGCTTGGCTCTTTGGGAAGCCAAAATGGCTGAAAAAGCCCGTGAGAAAGAGGAAGAGTGTGAAAAGTATGGCCCAGACTATGTGCCTCAGAAATCCCATGGCAAAAAAGTGAAACGGGAGCCTGCTGAGCCACATGAAACTTCAGAGCCCACTTACCTGCGTTTCATCAAGTCTCTTGCCGAAAGGACCATGTCCGTGACCACAGACTCCACAGTAACTACATCTCCATATGCCTTCACTCGGGTCACAGGGCCTTACAACAGATATATATGATATCACCCCCTTTTGTTGGTTACCTCACTTGAAAAGACCACAACCAACCTGTCAGTAGTATAGTTCTCATGACGTGGGCAGTGGGGAAAGGTCACAGT']]
+	 );
+    if ($analysisMode eq 'CUSTOM') {
+	foreach my $assay (sort(keys %requiredAssays)) {
+	    push(@finalRefs,@{$defaultRefs{$assay}});
+	}
+    } else {
+        foreach my $assay (sort(keys %requiredAssays)) {
+	    push(@finalRefs,@{$defaultRefs{$assay}});
+	}
+    }
+    return (\@finalRefs);
+}
+
+sub printCreateRefCmd {
+    my ($fh) = @_;
+    my $refData = &obtainReferenceData();
+    print $fh "create reference -file - << HERE_TERMINATOR\n";
+    print $fh join("\t", ("Name", "Sequence")), "\n";
+    foreach my $refLine (@{$refData}) {
+        my ($name, $seq) = @{$refLine};
+        print $fh join("\t", ($name, $seq)), "\n";
+    }
+    print $fh "HERE_TERMINATOR\n";
+}
+
+sub obtainAmpData {
+    my @finalAmpData = ();
+    my %defaultAmpData =
+	('RUNX1' =>
+	 [['RUNX1_E03', 'RUNX1_E03', '', 
+	   'GCTGTTTGCAGGGTCCTAAC', 'GGCCTCCGCCTGTCCTC', '21', '331'],
+	  ['RUNX1_E04', 'RUNX1_E04', '', 
+	   'CATTGCTATTCCTCTGCAACC', 'GTTTGTTGCCATGAAACGTG', '22', '322'],
+	  ['RUNX1_E05', 'RUNX1_E05', '', 
+	   'AAATTCCGGGAGTGTTGTCA', 'GAAAGGTTGAACCCAAGGAA', '21', '321'],
+	  ['RUNX1_E06', 'RUNX1_E06', '', 
+	   'TGATCTCTTCCCTCCCTCCT', 'CAGTTGGTCTGGGAAGGTGT', '21', '328'],
+	  ['RUNX1_E07', 'RUNX1_E07', '',
+	   'ATTTGAACAAGGGCCACTCA', 'AATGTTCTGCCAACTCCTTCA', '21', '321'],
+	  ['RUNX1_E08.01', 'RUNX1_E08', '',
+	   'CTCCGCAACCTCCTACTCAC', 'CCCACCATGGAGAACTGGTA', '21', '322'],
+	  ['RUNX1_E08.02', 'RUNX1_E08', '', 
+	   'CCCGTTCCAAGCCAGCTC', 'GCTTGTCGCGAACAGGAG', '283', '588']],
+	 
+	 'TET2_CBL_KRAS' =>
+	 [['CBL_E08', 'CBL_E08', '', 
+	   'CCAGACTAGATGCTTTCTGGTTTA', 'CCGAATTTTCCAAGGTTATTACA', '25', '325'],
+	  ['CBL_E09', 'CBL_E09', '', 
+	   'GATGCATCTGTTACTATCTTTTGC', 'CCTATCATTGTAGTTTGGATATCGT', 
+	   '25', '307'],
+	  
+	  ['KRAS_E02', 'KRAS_E02', '', 
+	   'TTAACCTTATGTGTGACATGTTCTAA', 'GAAAGTAAAGTTCCCATATTAATGGT', 
+	   '27', '334'],
+	  ['KRAS_E03', 'KRAS_E03', '', 
+	   'TGTAATAATCCAGACTGTGTTTCTCC', 'CAGGGATATTACCTACCTCATAAACA', 
+	   '27', '324'],
+	  
+	  ['TET2_E03.01', 'TET2_E03', '', 
+	   'ATTCAACTAGAGGGCAGCCTTG', 'ACTGTGCGTTTTATTCCTCCAT', '23', '316'],
+	  ['TET2_E03.02', 'TET2_E03', '', 
+	   'GAATACCCTGTATGAAGGGAAGC', 'CCCACTGCAGTTATGTGTTGAA', '253', '542'],
+	  ['TET2_E03.03', 'TET2_E03', '', 
+	   'TGTAGCCCAAGAAAATGCAG', 'TGGGTGAGTGATCTCACAGG', '524', '826'],
+	  ['TET2_E03.04', 'TET2_E03', '', 
+	   'CATCTCACATAAATGCCATTAACA', 'AGCTTGCAAATTGCTGCTG', '806', '1112'],
+	  ['TET2_E03.05', 'TET2_E03', '', 
+	   'GAAAATAACATCCAGGGAACCA', 'CCCTCTATTTTCACTTCCCTTAAA', 
+	   '1076', '1379'],
+	  ['TET2_E03.06', 'TET2_E03', '', 
+	   'GGAGTTTTAGAAGAACACCACCA', 'TCGACCCTTCAGAATCTCTTG', '1353', '1656'],
+	  ['TET2_E03.07', 'TET2_E03', '', 
+	   'CCAATTTTTGGTAGCAGTGGA', 'CCAGCTGTGTTGTTTTCTGG', '1615', '1907'],
+	  ['TET2_E03.08', 'TET2_E03', '', 
+	   'TGACCTCCAAACAATACACTGG', 'TGAGTTTGAAAATGGCTCAGTC', '1866', '2171'],
+	  ['TET2_E03.09', 'TET2_E03', '', 
+	   'CCCAGTGTTGAAACAGCA', 'ACTTCCTCCAGTCCCATTTG', '2151', '2451'],
+	  ['TET2_E03.10', 'TET2_E03', '', 
+	   'TGGTGAAAATCAGTATTCAAAATCA', 'CCCTGTAGAACTGAAGCTTGTTG', 
+	   '2428', '2715'],
+	  ['TET2_E03.11', 'TET2_E03', '', 
+	   'CTTCTTCACAGGTGCTTTCAAG', 'ATACAGGCATGTGGCTTGC', '2699', '3004'],
+	  ['TET2_E03.12', 'TET2_E03', '', 
+	   'TTGCCATAGTCAGATGCACAG', 'CTGAAGAAGTTGTTTGCTGCTCT', '2982', '3287'],
+	  ['TET2_E03.13', 'TET2_E03', '',
+	   'TTGACTAGACAAACCACTGCTG', 'TTTATGAGCCTTTACAAATTGCTG', 
+	   '3260', '3556'],
+	  ['TET2_E04', 'TET2_E04', '', 
+	   'TGGCACATTTTCTAATAGATCAGTC', 'CTTTGTGTGTGAAGGCTGGA', '26', '324'],
+	  ['TET2_E05', 'TET2_E05', '', 
+	   'AAACCGTTCATTTCTCAGGATG', 'GTAATGTTCTTTTTAACTGGCATGA', '23', '311'],
+	  ['TET2_E06', 'TET2_E06', '',
+	   'TGACCCTTGTTTTGTTTTGG', 'CGCTGAACTCTCTTCCTTTCA', '21', '334'],
+	  ['TET2_E07', 'TET2_E07', '', 
+	   'ATAGACACCTATAATATCAGCTGCAC', 'CAGTTTGGGAAAAACTTTGATTA', 
+	   '27', '326'],
+	  ['TET2_E08', 'TET2_E08', '', 
+	   'CCATATATTGTGTTTGGGATTCAA', 'GCAGTGGTTTCAACAATTAAGAG', '25', '314'],
+	  ['TET2_E09', 'TET2_E09', '', 
+	   'TGCTCTATTTTGTGTCATTCCATT', 'CAGTGTGAGAACAGACTCAACAG', '25', '318'],
+	  ['TET2_E10.01', 'TET2_E10', '', 
+	   'GGGACCTGTAGTTGAGGCTGT', 'GGGGCTGACTTTTCCTTTTC', '22', '327'],
+	  ['TET2_E10.02', 'TET2_E10', '', 
+	   'GAGTTTGGGAGTGTGGAAGC', 'GGGGGCAAAACCAAAATAAT', '162', '456'],
+	  ['TET2_E11.01', 'TET2_E11', '', 
+	   'GCCTTCATAAAATAATCATCAACA', 'CTGCAGCTTGAGATGAGGTG', '25', '324'],
+	  ['TET2_E11.02', 'TET2_E11', '',
+	   'CCAATCCAGTTAGTCCTTATCCA', 'AAAACTCTGGCTATTTCCAAACC', '269', '572'],
+	  ['TET2_E11.03', 'TET2_E11', '', 
+	   'CAAGCCAAGACCCTCTGTCT', 'GCATGAAGAGAGCTGTTGAA', '533', '844'],
+	  ['TET2_E11.04', 'TET2_E11', '',
+	   'GGTGAACATCATTCACCTTCTC', 'GAATTGACCCATGAGTTGGAG', '810', '1121'],
+	  ['TET2_E11.05', 'TET2_E11', '', 
+	   'AGACAGCGAGCAGAGCTTTC', 'AAGTTTCATGTGGCTCAGCA', '1092', '1386'],
+	  ['TET2_E11.06', 'TET2_E11', '', 
+	   'AGCCCGTGAGAAAGAGGAAG', 'ACTGTGACCTTTCCCCACTG', '1320', '1615']]
+	 );
+    if ($analysisMode eq 'CUSTOM') {
+	foreach my $assay (sort(keys %requiredAssays)) {
+	    push(@finalAmpData,@{$defaultAmpData{$assay}});
+	}
+    } else {
+	foreach my $assay (sort(keys %requiredAssays)) {
+	    push(@finalAmpData,@{$defaultAmpData{$assay}});
+	}
+    }
+    return (\@finalAmpData);
+}
+
+sub obtainUniversalTails {
+    my @finalTails = ("","");
+    
+    if ($fourPrimerUniversalTails) {
+	@finalTails = ($providedForwardUniversalTail,
+		       $providedReverseUniversalTail);
+    }
+    return (\@finalTails);
+}
+
+sub printCreateAmpCmd {
+    my ($fh) = @_;
+    my $ampData = &obtainAmpData();
+    my ($ut1, $ut2) = @{ &obtainUniversalTails() };
+    print $fh "create amplicon -checkPrimerMatch false -file - << HERE_TERMINATOR\n";
+    print $fh join("\t", ("Name", "Reference", "Annotation", "Primer1", "Primer2", "Start", "End")), "\n";
+    foreach my $ampLine (@{$ampData}) {
+        my ($name, $ref, $annot, $primer1, 
+	    $primer2, $insStart, $insEnd) = @{$ampLine};
+        if ($analysisMode eq 'CUSTOM' && $fourPrimerUniversalTails) {
+            $primer1 = $ut1 . $primer1;
+            $primer2 = $ut2 . $primer2;
+        }
+        print $fh join("\t", ($name, $ref, $annot, $primer1,
+			      $primer2, $insStart, $insEnd)), "\n";
+    }
+    print $fh "HERE_TERMINATOR\n";
+}
+
+
+sub printCreateVariantCmd {
+    my ($fh) = @_;
+    print $fh <<SETUP_TERMINATOR;
+create variant -status accepted -file - << HERE_TERMINATOR
+"Name"	"Reference"	"Pattern"	"Annotation"
+SETUP_TERMINATOR
+    if (exists($requiredAssays{'TET2_CBL_KRAS'})) {
+	print $fh <<SETUP_TERMINATOR;
+Marker_CBL_E08_CDS_Begin_RefPos_162	CBL_E08	m(162)	"CBL_E08 CDS Begin is Codon 366, Position 1, Reference Position 162"
+Marker_CBL_E08_CDS_Codon_366_RefPos_162-164	CBL_E08	m(162-164)	"Codon 366 (Reference Positions 162-164) is the First Complete CDS Codon in Amplicon CBL_E08"
+Marker_CBL_E08_CDS_End_RefPos_293	CBL_E08	m(293)	"CBL_E08 CDS End is Codon 409, Position 3, Reference Position 293"
+Marker_CBL_E08_CDS_Codon_409_RefPos_291-293	CBL_E08	m(291-293)	"Codon 409 (Reference Positions 291-293) is the Last Complete CDS Codon in Amplicon CBL_E08"
+Marker_CBL_E09_CDS_Begin_RefPos_36	CBL_E09	m(36)	"CBL_E09 CDS Begin is Codon 410, Position 1, Reference Position 36"
+Marker_CBL_E09_CDS_Codon_410_RefPos_36-38	CBL_E09	m(36-38)	"Codon 410 (Reference Positions 36-38) is the First Complete CDS Codon in Amplicon CBL_E09"
+Marker_CBL_E09_CDS_End_RefPos_239	CBL_E09	m(239)	"CBL_E09 CDS End is Codon 477, Position 3, Reference Position 239"
+Marker_CBL_E09_CDS_Codon_477_RefPos_237-239	CBL_E09	m(237-239)	"Codon 477 (Reference Positions 237-239) is the Last Complete CDS Codon in Amplicon CBL_E09"
+Marker_KRAS_E02_CDS_Begin_RefPos_70	KRAS_E02	m(70)	"KRAS_E02 CDS Begin is Codon 1, Position 1, Reference Position 70"
+Marker_KRAS_E02_CDS_Codon_1_RefPos_70-72	KRAS_E02	m(70-72)	"Codon 1 (Reference Positions 70-72) is the First Complete CDS Codon in Amplicon KRAS_E02"
+Marker_KRAS_E02_CDS_End_RefPos_180	KRAS_E02	m(180)	"KRAS_E02 CDS End is Codon 37, Position 3, Reference Position 180"
+Marker_KRAS_E02_CDS_Codon_37_RefPos_178-180	KRAS_E02	m(178-180)	"Codon 37 (Reference Positions 178-180) is the Last Complete CDS Codon in Amplicon KRAS_E02"
+Marker_KRAS_E03_CDS_Begin_RefPos_35	KRAS_E03	m(35)	"KRAS_E03 CDS Begin is Codon 38, Position 1, Reference Position 35"
+Marker_KRAS_E03_CDS_Codon_38_RefPos_35-37	KRAS_E03	m(35-37)	"Codon 38 (Reference Positions 35-37) is the First Complete CDS Codon in Amplicon KRAS_E03"
+Marker_KRAS_E03_CDS_End_RefPos_213	KRAS_E03	m(213)	"KRAS_E03 CDS End is Codon 97, Position 2, Reference Position 213"
+Marker_KRAS_E03_CDS_Codon_96_RefPos_209-211	KRAS_E03	m(209-211)	"Codon 96 (Reference Positions 209-211) is the Last Complete CDS Codon in Amplicon KRAS_E03"
+Marker_TET2_E03.01_CDS_Begin_RefPos_46	TET2_E03	m(46)	"TET2_E03 CDS Begin is Codon 1, Position 1, Reference Position 46"
+Marker_TET2_E03.01_CDS_Codon_1_RefPos_46-48	TET2_E03	m(46-48)	"Codon 1 (Reference Positions 46-48) is the First Complete CDS Codon in Amplicon TET2_E03.01"
+Marker_TET2_E03.01_CDS_Codon_90_RefPos_313-315	TET2_E03	m(313-315)	"Codon 90 (Reference Positions 313-315) is the Last Complete CDS Codon in Amplicon TET2_E03.01"
+Marker_TET2_E03.02_CDS_Codon_70_RefPos_253-255	TET2_E03	m(253-255)	"Codon 70 (Reference Positions 253-255) is the First Complete CDS Codon in Amplicon TET2_E03.02"
+Marker_TET2_E03.02_CDS_Codon_165_RefPos_538-540	TET2_E03	m(538-540)	"Codon 165 (Reference Positions 538-540) is the Last Complete CDS Codon in Amplicon TET2_E03.02"
+Marker_TET2_E03.03_CDS_Codon_161_RefPos_526-528	TET2_E03	m(526-528)	"Codon 161 (Reference Positions 526-528) is the First Complete CDS Codon in Amplicon TET2_E03.03"
+Marker_TET2_E03.03_CDS_Codon_260_RefPos_823-825	TET2_E03	m(823-825)	"Codon 260 (Reference Positions 823-825) is the Last Complete CDS Codon in Amplicon TET2_E03.03"
+Marker_TET2_E03.04_CDS_Codon_255_RefPos_808-810	TET2_E03	m(808-810)	"Codon 255 (Reference Positions 808-810) is the First Complete CDS Codon in Amplicon TET2_E03.04"
+Marker_TET2_E03.04_CDS_Codon_355_RefPos_1108-1110	TET2_E03	m(1108-1110)	"Codon 355 (Reference Positions 1108-1110) is the Last Complete CDS Codon in Amplicon TET2_E03.04"
+Marker_TET2_E03.05_CDS_Codon_345_RefPos_1078-1080	TET2_E03	m(1078-1080)	"Codon 345 (Reference Positions 1078-1080) is the First Complete CDS Codon in Amplicon TET2_E03.05"
+Marker_TET2_E03.05_CDS_Codon_444_RefPos_1375-1377	TET2_E03	m(1375-1377)	"Codon 444 (Reference Positions 1375-1377) is the Last Complete CDS Codon in Amplicon TET2_E03.05"
+Marker_TET2_E03.06_CDS_Codon_437_RefPos_1354-1356	TET2_E03	m(1354-1356)	"Codon 437 (Reference Positions 1354-1356) is the First Complete CDS Codon in Amplicon TET2_E03.06"
+Marker_TET2_E03.06_CDS_Codon_537_RefPos_1654-1656	TET2_E03	m(1654-1656)	"Codon 537 (Reference Positions 1654-1656) is the Last Complete CDS Codon in Amplicon TET2_E03.06"
+Marker_TET2_E03.07_CDS_Codon_524_RefPos_1615-1617	TET2_E03	m(1615-1617)	"Codon 524 (Reference Positions 1615-1617) is the First Complete CDS Codon in Amplicon TET2_E03.07"
+Marker_TET2_E03.07_CDS_Codon_620_RefPos_1903-1905	TET2_E03	m(1903-1905)	"Codon 620 (Reference Positions 1903-1905) is the Last Complete CDS Codon in Amplicon TET2_E03.07"
+Marker_TET2_E03.08_CDS_Codon_608_RefPos_1867-1869	TET2_E03	m(1867-1869)	"Codon 608 (Reference Positions 1867-1869) is the First Complete CDS Codon in Amplicon TET2_E03.08"
+Marker_TET2_E03.08_CDS_Codon_708_RefPos_2167-2169	TET2_E03	m(2167-2169)	"Codon 708 (Reference Positions 2167-2169) is the Last Complete CDS Codon in Amplicon TET2_E03.08"
+Marker_TET2_E03.09_CDS_Codon_703_RefPos_2152-2154	TET2_E03	m(2152-2154)	"Codon 703 (Reference Positions 2152-2154) is the First Complete CDS Codon in Amplicon TET2_E03.09"
+Marker_TET2_E03.09_CDS_Codon_802_RefPos_2449-2451	TET2_E03	m(2449-2451)	"Codon 802 (Reference Positions 2449-2451) is the Last Complete CDS Codon in Amplicon TET2_E03.09"
+Marker_TET2_E03.10_CDS_Codon_795_RefPos_2428-2430	TET2_E03	m(2428-2430)	"Codon 795 (Reference Positions 2428-2430) is the First Complete CDS Codon in Amplicon TET2_E03.10"
+Marker_TET2_E03.10_CDS_Codon_890_RefPos_2713-2715	TET2_E03	m(2713-2715)	"Codon 890 (Reference Positions 2713-2715) is the Last Complete CDS Codon in Amplicon TET2_E03.10"
+Marker_TET2_E03.11_CDS_Codon_886_RefPos_2701-2703	TET2_E03	m(2701-2703)	"Codon 886 (Reference Positions 2701-2703) is the First Complete CDS Codon in Amplicon TET2_E03.11"
+Marker_TET2_E03.11_CDS_Codon_986_RefPos_3001-3003	TET2_E03	m(3001-3003)	"Codon 986 (Reference Positions 3001-3003) is the Last Complete CDS Codon in Amplicon TET2_E03.11"
+Marker_TET2_E03.12_CDS_Codon_980_RefPos_2983-2985	TET2_E03	m(2983-2985)	"Codon 980 (Reference Positions 2983-2985) is the First Complete CDS Codon in Amplicon TET2_E03.12"
+Marker_TET2_E03.12_CDS_Codon_1080_RefPos_3283-3285	TET2_E03	m(3283-3285)	"Codon 1080 (Reference Positions 3283-3285) is the Last Complete CDS Codon in Amplicon TET2_E03.12"
+Marker_TET2_E03.13_CDS_Codon_1073_RefPos_3262-3264	TET2_E03	m(3262-3264)	"Codon 1073 (Reference Positions 3262-3264) is the First Complete CDS Codon in Amplicon TET2_E03.13"
+Marker_TET2_E03.13_CDS_End_RefPos_3454	TET2_E03	m(3454)	"TET2_E03 CDS End is Codon 1137, Position 1, Reference Position 3454"
+Marker_TET2_E03.13_CDS_Codon_1136_RefPos_3451-3453	TET2_E03	m(3451-3453)	"Codon 1136 (Reference Positions 3451-3453) is the Last Complete CDS Codon in Amplicon TET2_E03.13"
+Marker_TET2_E04_CDS_Begin_RefPos_173	TET2_E04	m(173)	"TET2_E04 CDS Begin is Codon 1137, Position 2, Reference Position 173"
+Marker_TET2_E04_CDS_Codon_1138_RefPos_175-177	TET2_E04	m(175-177)	"Codon 1138 (Reference Positions 175-177) is the First Complete CDS Codon in Amplicon TET2_E04"
+Marker_TET2_E04_CDS_End_RefPos_263	TET2_E04	m(263)	"TET2_E04 CDS End is Codon 1167, Position 2, Reference Position 263"
+Marker_TET2_E04_CDS_Codon_1166_RefPos_259-261	TET2_E04	m(259-261)	"Codon 1166 (Reference Positions 259-261) is the Last Complete CDS Codon in Amplicon TET2_E04"
+Marker_TET2_E05_CDS_Begin_RefPos_125	TET2_E05	m(125)	"TET2_E05 CDS Begin is Codon 1167, Position 3, Reference Position 125"
+Marker_TET2_E05_CDS_Codon_1168_RefPos_126-128	TET2_E05	m(126-128)	"Codon 1168 (Reference Positions 126-128) is the First Complete CDS Codon in Amplicon TET2_E05"
+Marker_TET2_E05_CDS_End_RefPos_218	TET2_E05	m(218)	"TET2_E05 CDS End is Codon 1198, Position 3, Reference Position 218"
+Marker_TET2_E05_CDS_Codon_1198_RefPos_216-218	TET2_E05	m(216-218)	"Codon 1198 (Reference Positions 216-218) is the Last Complete CDS Codon in Amplicon TET2_E05"
+Marker_TET2_E06_CDS_Begin_RefPos_63	TET2_E06	m(63)	"TET2_E06 CDS Begin is Codon 1199, Position 1, Reference Position 63"
+Marker_TET2_E06_CDS_Codon_1199_RefPos_63-65	TET2_E06	m(63-65)	"Codon 1199 (Reference Positions 63-65) is the First Complete CDS Codon in Amplicon TET2_E06"
+Marker_TET2_E06_CDS_End_RefPos_271	TET2_E06	m(271)	"TET2_E06 CDS End is Codon 1268, Position 2, Reference Position 271"
+Marker_TET2_E06_CDS_Codon_1267_RefPos_267-269	TET2_E06	m(267-269)	"Codon 1267 (Reference Positions 267-269) is the Last Complete CDS Codon in Amplicon TET2_E06"
+Marker_TET2_E07_CDS_Begin_RefPos_78	TET2_E07	m(78)	"TET2_E07 CDS Begin is Codon 1268, Position 3, Reference Position 78"
+Marker_TET2_E07_CDS_Codon_1269_RefPos_79-81	TET2_E07	m(79-81)	"Codon 1269 (Reference Positions 79-81) is the First Complete CDS Codon in Amplicon TET2_E07"
+Marker_TET2_E07_CDS_End_RefPos_228	TET2_E07	m(228)	"TET2_E07 CDS End is Codon 1318, Position 3, Reference Position 228"
+Marker_TET2_E07_CDS_Codon_1318_RefPos_226-228	TET2_E07	m(226-228)	"Codon 1318 (Reference Positions 226-228) is the Last Complete CDS Codon in Amplicon TET2_E07"
+Marker_TET2_E08_CDS_Begin_RefPos_115	TET2_E08	m(115)	"TET2_E08 CDS Begin is Codon 1319, Position 1, Reference Position 115"
+Marker_TET2_E08_CDS_Codon_1319_RefPos_115-117	TET2_E08	m(115-117)	"Codon 1319 (Reference Positions 115-117) is the First Complete CDS Codon in Amplicon TET2_E08"
+Marker_TET2_E08_CDS_End_RefPos_204	TET2_E08	m(204)	"TET2_E08 CDS End is Codon 1348, Position 3, Reference Position 204"
+Marker_TET2_E08_CDS_Codon_1348_RefPos_202-204	TET2_E08	m(202-204)	"Codon 1348 (Reference Positions 202-204) is the Last Complete CDS Codon in Amplicon TET2_E08"
+Marker_TET2_E09_CDS_Begin_RefPos_153	TET2_E09	m(153)	"TET2_E09 CDS Begin is Codon 1349, Position 1, Reference Position 153"
+Marker_TET2_E09_CDS_Codon_1349_RefPos_153-155	TET2_E09	m(153-155)	"Codon 1349 (Reference Positions 153-155) is the First Complete CDS Codon in Amplicon TET2_E09"
+Marker_TET2_E09_CDS_End_RefPos_290	TET2_E09	m(290)	"TET2_E09 CDS End is Codon 1394, Position 3, Reference Position 290"
+Marker_TET2_E09_CDS_Codon_1394_RefPos_288-290	TET2_E09	m(288-290)	"Codon 1394 (Reference Positions 288-290) is the Last Complete CDS Codon in Amplicon TET2_E09"
+Marker_TET2_E10.01_CDS_Begin_RefPos_43	TET2_E10	m(43)	"TET2_E10 CDS Begin is Codon 1395, Position 1, Reference Position 43"
+Marker_TET2_E10.01_CDS_Codon_1395_RefPos_43-45	TET2_E10	m(43-45)	"Codon 1395 (Reference Positions 43-45) is the First Complete CDS Codon in Amplicon TET2_E10.01"
+Marker_TET2_E10.01_CDS_Codon_1489_RefPos_325-327	TET2_E10	m(325-327)	"Codon 1489 (Reference Positions 325-327) is the Last Complete CDS Codon in Amplicon TET2_E10.01"
+Marker_TET2_E10.02_CDS_Codon_1435_RefPos_163-165	TET2_E10	m(163-165)	"Codon 1435 (Reference Positions 163-165) is the First Complete CDS Codon in Amplicon TET2_E10.02"
+Marker_TET2_E10.02_CDS_End_RefPos_397	TET2_E10	m(397)	"TET2_E10 CDS End is Codon 1513, Position 1, Reference Position 397"
+Marker_TET2_E10.02_CDS_Codon_1512_RefPos_394-396	TET2_E10	m(394-396)	"Codon 1512 (Reference Positions 394-396) is the Last Complete CDS Codon in Amplicon TET2_E10.02"
+Marker_TET2_E11.01_CDS_Begin_RefPos_66	TET2_E11	m(66)	"TET2_E11 CDS Begin is Codon 1513, Position 2, Reference Position 66"
+Marker_TET2_E11.01_CDS_Codon_1514_RefPos_68-70	TET2_E11	m(68-70)	"Codon 1514 (Reference Positions 68-70) is the First Complete CDS Codon in Amplicon TET2_E11.01"
+Marker_TET2_E11.01_CDS_Codon_1598_RefPos_320-322	TET2_E11	m(320-322)	"Codon 1598 (Reference Positions 320-322) is the Last Complete CDS Codon in Amplicon TET2_E11.01"
+Marker_TET2_E11.02_CDS_Codon_1581_RefPos_269-271	TET2_E11	m(269-271)	"Codon 1581 (Reference Positions 269-271) is the First Complete CDS Codon in Amplicon TET2_E11.02"
+Marker_TET2_E11.02_CDS_Codon_1681_RefPos_569-571	TET2_E11	m(569-571)	"Codon 1681 (Reference Positions 569-571) is the Last Complete CDS Codon in Amplicon TET2_E11.02"
+Marker_TET2_E11.03_CDS_Codon_1669_RefPos_533-535	TET2_E11	m(533-535)	"Codon 1669 (Reference Positions 533-535) is the First Complete CDS Codon in Amplicon TET2_E11.03"
+Marker_TET2_E11.03_CDS_Codon_1772_RefPos_842-844	TET2_E11	m(842-844)	"Codon 1772 (Reference Positions 842-844) is the Last Complete CDS Codon in Amplicon TET2_E11.03"
+Marker_TET2_E11.04_CDS_Codon_1762_RefPos_812-814	TET2_E11	m(812-814)	"Codon 1762 (Reference Positions 812-814) is the First Complete CDS Codon in Amplicon TET2_E11.04"
+Marker_TET2_E11.04_CDS_Codon_1864_RefPos_1118-1120	TET2_E11	m(1118-1120)	"Codon 1864 (Reference Positions 1118-1120) is the Last Complete CDS Codon in Amplicon TET2_E11.04"
+Marker_TET2_E11.05_CDS_Codon_1856_RefPos_1094-1096	TET2_E11	m(1094-1096)	"Codon 1856 (Reference Positions 1094-1096) is the First Complete CDS Codon in Amplicon TET2_E11.05"
+Marker_TET2_E11.05_CDS_Codon_1952_RefPos_1382-1384	TET2_E11	m(1382-1384)	"Codon 1952 (Reference Positions 1382-1384) is the Last Complete CDS Codon in Amplicon TET2_E11.05"
+Marker_TET2_E11.06_CDS_Codon_1932_RefPos_1322-1324	TET2_E11	m(1322-1324)	"Codon 1932 (Reference Positions 1322-1324) is the First Complete CDS Codon in Amplicon TET2_E11.06"
+Marker_TET2_E11.06_CDS_End_RefPos_1537	TET2_E11	m(1537)	"TET2_E11 CDS End is Codon 2003, Position 3, Reference Position 1537"
+Marker_TET2_E11.06_CDS_Codon_2003_RefPos_1535-1537	TET2_E11	m(1535-1537)	"Codon 2003 (Reference Positions 1535-1537) is the Last Complete CDS Codon in Amplicon TET2_E11.06"
+SETUP_TERMINATOR
+    }
+    if (exists($requiredAssays{'RUNX1'})) {
+	print $fh <<SETUP_TERMINATOR;
+Marker_RUNX1_E03_CDS_Begin_RefPos_38	RUNX1_E03	m(38)	"RUNX1_E03 CDS Begin is Codon 1, Position 1, Reference Position 38"
+Marker_RUNX1_E03_CDS_Codon_1_RefPos_38-40	RUNX1_E03	m(38-40)	"Codon 1 (Reference Positions 38-40) is the First Complete CDS Codon in Amplicon RUNX1_E03"
+Marker_RUNX1_E03_CDS_End_RefPos_307	RUNX1_E03	m(307)	"RUNX1_E03 CDS End is Codon 90, Position 3, Reference Position 307"
+Marker_RUNX1_E03_CDS_Codon_90_RefPos_305-307	RUNX1_E03	m(305-307)	"Codon 90 (Reference Positions 305-307) is the Last Complete CDS Codon in Amplicon RUNX1_E03"
+Marker_RUNX1_E04_CDS_Begin_RefPos_136	RUNX1_E04	m(136)	"RUNX1_E04 CDS Begin is Codon 91, Position 1, Reference Position 136"
+Marker_RUNX1_E04_CDS_Codon_91_RefPos_136-138	RUNX1_E04	m(136-138)	"Codon 91 (Reference Positions 136-138) is the First Complete CDS Codon in Amplicon RUNX1_E04"
+Marker_RUNX1_E04_CDS_End_RefPos_292	RUNX1_E04	m(292)	"RUNX1_E04 CDS End is Codon 143, Position 1, Reference Position 292"
+Marker_RUNX1_E04_CDS_Codon_142_RefPos_289-291	RUNX1_E04	m(289-291)	"Codon 142 (Reference Positions 289-291) is the Last Complete CDS Codon in Amplicon RUNX1_E04"
+Marker_RUNX1_E05_CDS_Begin_RefPos_135	RUNX1_E05	m(135)	"RUNX1_E05 CDS Begin is Codon 143, Position 2, Reference Position 135"
+Marker_RUNX1_E05_CDS_Codon_144_RefPos_137-139	RUNX1_E05	m(137-139)	"Codon 144 (Reference Positions 137-139) is the First Complete CDS Codon in Amplicon RUNX1_E05"
+Marker_RUNX1_E05_CDS_End_RefPos_239	RUNX1_E05	m(239)	"RUNX1_E05 CDS End is Codon 178, Position 1, Reference Position 239"
+Marker_RUNX1_E05_CDS_Codon_177_RefPos_236-238	RUNX1_E05	m(236-238)	"Codon 177 (Reference Positions 236-238) is the Last Complete CDS Codon in Amplicon RUNX1_E05"
+Marker_RUNX1_E06_CDS_Begin_RefPos_62	RUNX1_E06	m(62)	"RUNX1_E06 CDS Begin is Codon 178, Position 2, Reference Position 62"
+Marker_RUNX1_E06_CDS_Codon_179_RefPos_64-66	RUNX1_E06	m(64-66)	"Codon 179 (Reference Positions 64-66) is the First Complete CDS Codon in Amplicon RUNX1_E06"
+Marker_RUNX1_E06_CDS_End_RefPos_253	RUNX1_E06	m(253)	"RUNX1_E06 CDS End is Codon 242, Position 1, Reference Position 253"
+Marker_RUNX1_E06_CDS_Codon_241_RefPos_250-252	RUNX1_E06	m(250-252)	"Codon 241 (Reference Positions 250-252) is the Last Complete CDS Codon in Amplicon RUNX1_E06"
+Marker_RUNX1_E07_CDS_Begin_RefPos_92	RUNX1_E07	m(92)	"RUNX1_E07 CDS Begin is Codon 242, Position 2, Reference Position 92"
+Marker_RUNX1_E07_CDS_Codon_243_RefPos_94-96	RUNX1_E07	m(94-96)	"Codon 243 (Reference Positions 94-96) is the First Complete CDS Codon in Amplicon RUNX1_E07"
+Marker_RUNX1_E07_CDS_End_RefPos_253	RUNX1_E07	m(253)	"RUNX1_E07 CDS End is Codon 296, Position 1, Reference Position 253"
+Marker_RUNX1_E07_CDS_Codon_295_RefPos_250-252	RUNX1_E07	m(250-252)	"Codon 295 (Reference Positions 250-252) is the Last Complete CDS Codon in Amplicon RUNX1_E07"
+Marker_RUNX1_E08.01_CDS_Begin_RefPos_51	RUNX1_E08	m(51)	"RUNX1_E08 CDS Begin is Codon 296, Position 2, Reference Position 51"
+Marker_RUNX1_E08.01_CDS_Codon_297_RefPos_53-55	RUNX1_E08	m(53-55)	"Codon 297 (Reference Positions 53-55) is the First Complete CDS Codon in Amplicon RUNX1_E08.01"
+Marker_RUNX1_E08.01_CDS_Codon_386_RefPos_320-322	RUNX1_E08	m(320-322)	"Codon 386 (Reference Positions 320-322) is the Last Complete CDS Codon in Amplicon RUNX1_E08.01"
+Marker_RUNX1_E08.02_CDS_Codon_374_RefPos_284-286	RUNX1_E08	m(284-286)	"Codon 374 (Reference Positions 284-286) is the First Complete CDS Codon in Amplicon RUNX1_E08.02"
+Marker_RUNX1_E08.02_CDS_End_RefPos_526	RUNX1_E08	m(526)	"RUNX1_E08 CDS End is Codon 454, Position 3, Reference Position 526"
+Marker_RUNX1_E08.02_CDS_Codon_454_RefPos_524-526	RUNX1_E08	m(524-526)	"Codon 454 (Reference Positions 524-526) is the Last Complete CDS Codon in Amplicon RUNX1_E08.02"
+SETUP_TERMINATOR
+    }
+    print $fh "HERE_TERMINATOR\n";
+}
+
+sub obtainMidData {
+    my @finalMidData     = ();
+    my @finalMidGroups   = ();
+    my @finalXSampleMids = ();
+    my %midSeqs454 =
+	(
+	 'Mid1'   => 'ACGAGTGCGT',
+	 'Mid2'   => 'ACGCTCGACA',
+	 'Mid3'   => 'AGACGCACTC',
+	 'Mid4'   => 'AGCACTGTAG',
+	 'Mid5'   => 'ATCAGACACG',
+	 'Mid6'   => 'ATATCGCGAG',
+	 'Mid7'   => 'CGTGTCTCTA',
+	 'Mid8'   => 'CTCGCGTGTC',
+	 'Mid9'   => 'TAGTATCAGC',
+	 'Mid10'  => 'TCTCTATGCG',
+	 'Mid11'  => 'TGATACGTCT',
+	 'Mid12'  => 'TACTGAGCTA',
+	 'Mid13'  => 'CATAGTAGTG',
+	 'Mid14'  => 'CGAGAGATAC',
+	 'Mid15'  => 'ATACGACGTA',
+	 'Mid16'  => 'TCACGTACTA',
+	 'Mid17'  => 'CGTCTAGTAC',
+	 'Mid18'  => 'TCTACGTAGC',
+	 'Mid19'  => 'TGTACTACTC',
+	 'Mid20'  => 'ACGACTACAG',
+	 'Mid21'  => 'CGTAGACTAG',
+	 'Mid22'  => 'TACGAGTATG',
+	 'Mid23'  => 'TACTCTCGTG',
+	 'Mid24'  => 'TAGAGACGAG',
+	 'Mid25'  => 'TCGTCGCTCG',
+	 'Mid26'  => 'ACATACGCGT',
+	 'Mid27'  => 'ACGCGAGTAT',
+	 'Mid28'  => 'ACTACTATGT',
+	 'Mid29'  => 'ACTGTACAGT',
+	 'Mid30'  => 'AGACTATACT',
+	 'Mid31'  => 'AGCGTCGTCT',
+	 'Mid32'  => 'AGTACGCTAT',
+	 'Mid33'  => 'ATAGAGTACT',
+	 'Mid34'  => 'CACGCTACGT',
+	 'Mid35'  => 'CAGTAGACGT',
+	 'Mid36'  => 'CGACGTGACT',
+	 'Mid37'  => 'TACACACACT',
+	 'Mid38'  => 'TACACGTGAT',
+	 'Mid39'  => 'TACAGATCGT',
+	 'Mid40'  => 'TACGCTGTCT',
+	 'Mid41'  => 'TAGTGTAGAT',
+	 'Mid42'  => 'TCGATCACGT',
+	 'Mid43'  => 'TCGCACTAGT',
+	 'Mid44'  => 'TCTAGCGACT',
+	 'Mid45'  => 'TCTATACTAT',
+	 'Mid46'  => 'TGACGTATGT',
+	 'Mid47'  => 'TGTGAGTAGT',
+	 'Mid48'  => 'ACAGTATATA',
+	 'Mid49'  => 'ACGCGATCGA',
+	 'Mid50'  => 'ACTAGCAGTA',
+	 'Mid51'  => 'AGCTCACGTA',
+	 'Mid52'  => 'AGTATACATA',
+	 'Mid53'  => 'AGTCGAGAGA',
+	 'Mid54'  => 'AGTGCTACGA',
+	 'Mid55'  => 'CGATCGTATA',
+	 'Mid56'  => 'CGCAGTACGA',
+	 'Mid57'  => 'CGCGTATACA',
+	 'Mid58'  => 'CGTACAGTCA',
+	 'Mid59'  => 'CGTACTCAGA',
+	 'Mid60'  => 'CTACGCTCTA',
+	 'Mid61'  => 'CTATAGCGTA',
+	 'Mid62'  => 'TACGTCATCA',
+	 'Mid63'  => 'TAGTCGCATA',
+	 'Mid64'  => 'TATATATACA',
+	 'Mid65'  => 'TATGCTAGTA',
+	 'Mid66'  => 'TCACGCGAGA',
+	 'Mid67'  => 'TCGATAGTGA',
+	 'Mid68'  => 'TCGCTGCGTA',
+	 'Mid69'  => 'TCTGACGTCA',
+	 'Mid70'  => 'TGAGTCAGTA',
+	 'Mid71'  => 'TGTAGTGTGA',
+	 'Mid72'  => 'TGTCACACGA',
+	 'Mid73'  => 'TGTCGTCGCA',
+	 'Mid74'  => 'ACACATACGC',
+	 'Mid75'  => 'ACAGTCGTGC',
+	 'Mid76'  => 'ACATGACGAC',
+	 'Mid77'  => 'ACGACAGCTC',
+	 'Mid78'  => 'ACGTCTCATC',
+	 'Mid79'  => 'ACTCATCTAC',
+	 'Mid80'  => 'ACTCGCGCAC',
+	 'Mid81'  => 'AGAGCGTCAC',
+	 'Mid82'  => 'AGCGACTAGC',
+	 'Mid83'  => 'AGTAGTGATC',
+	 'Mid84'  => 'AGTGACACAC',
+	 'Mid85'  => 'AGTGTATGTC',
+	 'Mid86'  => 'ATAGATAGAC',
+	 'Mid87'  => 'ATATAGTCGC',
+	 'Mid88'  => 'ATCTACTGAC',
+	 'Mid89'  => 'CACGTAGATC',
+	 'Mid90'  => 'CACGTGTCGC',
+	 'Mid91'  => 'CATACTCTAC',
+	 'Mid92'  => 'CGACACTATC',
+	 'Mid93'  => 'CGAGACGCGC',
+	 'Mid94'  => 'CGTATGCGAC',
+	 'Mid95'  => 'CGTCGATCTC',
+	 'Mid96'  => 'CTACGACTGC',
+	 'Mid97'  => 'CTAGTCACTC',
+	 'Mid98'  => 'CTCTACGCTC',
+	 'Mid99'  => 'CTGTACATAC',
+	 'Mid100' => 'TAGACTGCAC',
+	 'Mid101' => 'TAGCGCGCGC',
+	 'Mid102' => 'TAGCTCTATC',
+	 'Mid103' => 'TATAGACATC',
+	 'Mid104' => 'TATGATACGC',
+	 'Mid105' => 'TCACTCATAC',
+	 'Mid106' => 'TCATCGAGTC',
+	 'Mid107' => 'TCGAGCTCTC',
+	 'Mid108' => 'TCGCAGACAC',
+	 'Mid109' => 'TCTGTCTCGC',
+	 'Mid110' => 'TGAGTGACGC',
+	 'Mid111' => 'TGATGTGTAC',
+	 'Mid112' => 'TGCTATAGAC',
+	 'Mid113' => 'TGCTCGCTAC',
+	 'Mid114' => 'ACGTGCAGCG',
+	 'Mid115' => 'ACTCACAGAG',
+	 'Mid116' => 'AGACTCAGCG',
+	 'Mid117' => 'AGAGAGTGTG',
+	 'Mid118' => 'AGCTATCGCG',
+	 'Mid119' => 'AGTCTGACTG',
+	 'Mid120' => 'AGTGAGCTCG',
+	 'Mid121' => 'ATAGCTCTCG',
+	 'Mid122' => 'ATCACGTGCG',
+	 'Mid123' => 'ATCGTAGCAG',
+	 'Mid124' => 'ATCGTCTGTG',
+	 'Mid125' => 'ATGTACGATG',
+	 'Mid126' => 'ATGTGTCTAG',
+	 'Mid127' => 'CACACGATAG',
+	 'Mid128' => 'CACTCGCACG',
+	 'Mid129' => 'CAGACGTCTG',
+	 'Mid130' => 'CAGTACTGCG',
+	 'Mid131' => 'CGACAGCGAG',
+	 'Mid132' => 'CGATCTGTCG',
+	 'Mid133' => 'CGCGTGCTAG',
+	 'Mid134' => 'CGCTCGAGTG',
+	 'Mid135' => 'CGTGATGACG',
+	 'Mid136' => 'CTATGTACAG',
+	 'Mid137' => 'CTCGATATAG',
+	 'Mid138' => 'CTCGCACGCG',
+	 'Mid139' => 'CTGCGTCACG',
+	 'Mid140' => 'CTGTGCGTCG',
+	 'Mid141' => 'TAGCATACTG',
+	 'Mid142' => 'TATACATGTG',
+	 'Mid143' => 'TATCACTCAG',
+	 'Mid144' => 'TATCTGATAG',
+	 'Mid145' => 'TCGTGACATG',
+	 'Mid146' => 'TCTGATCGAG',
+	 'Mid147' => 'TGACATCTCG',
+	 'Mid148' => 'TGAGCTAGAG',
+	 'Mid149' => 'TGATAGAGCG',
+	 'Mid150' => 'TGCGTGTGCG',
+	 'Mid151' => 'TGCTAGTCAG',
+	 'Mid152' => 'TGTATCACAG',
+	 'Mid153' => 'TGTGCGCGTG'
+	 );
+    
+    my %midGroupPresets =
+	(
+	 "454Standard" => [map {"Mid" . $_} (1 .. 14)]
+	 );
+    
+    my @all454Mids = (sort(keys %midSeqs454));
+    @{ $midGroupPresets{"454Expanded"} } = @all454Mids;
+    
+    # Union the MIDs required by the assays being used for this run 
+    # as the '454Extended' set.
+    my %standardNeededMids = ();
+    foreach my $assay (sort(keys %requiredAssays)) {
+	my @sampleMids = @{$defaultAssayData{$assay}{'sampleMids'}};
+	my @controlMids = @{$defaultAssayData{$assay}{'controlMids'}};
+	foreach my $mid (@sampleMids,@controlMids) {
+	    $standardNeededMids{$mid} = 1;
+	}
+    }
+    my @standardMids = (sort(keys %standardNeededMids));
+    @{ $midGroupPresets{"$standardMidGroup"} } = @standardMids;
+    
+    my $finalMidGroup = $standardMidGroup;
+    if ($analysisMode eq 'CUSTOM') {
+        $finalMidGroup = "454Expanded";
+    }
+    
+    my %usedMidInc = ();
+    foreach my $mid (@{ $midGroupPresets{$finalMidGroup} }) {
+        my $midSeq = $midSeqs454{$mid};
+        if ($includedMidList && $analysisMode eq 'CUSTOM') {
+            if (!exists($midInclusionSet{$mid})) {
+                if ($xSamplesEnabled) {
+                    push(@finalXSampleMids, [$mid, $midSeq, $finalMidGroup]);
+                    $xSampleMids{$mid} = 1;
+                }
+                next;
+            } else {
+                $usedMidInc{$mid} = 1;
+            }
+        }
+        push(@finalMidData, [$mid, $midSeq, $finalMidGroup]);
+    }
+    my @wrongMids = ();
+    foreach my $mi (sort(keys %midInclusionSet)) {
+        if (!exists($usedMidInc{$mi})) {
+            push(@wrongMids, $mi);
+        }
+    }
+    if (@wrongMids) {
+        my $wl = join(", ", @wrongMids);
+        &logDie("The following MIDs ($wl) were specified as part of the --iml but were not available under this analysis mode.");
+    }
+    
+    @finalMidGroups = ($finalMidGroup);
+    return (\@finalMidGroups, \@finalMidData, \@finalXSampleMids);
+}
+
+sub printCreateMIDsCmd {
+    my ($fh) = @_;
+    
+    my ($midGroups, $midData, $xMidData) = &obtainMidData();
+    
+    if (@{$midGroups}) {
+        print $fh "create midGroup -file - << HERE_TERMINATOR\n";
+        print $fh "Name\n";
+        foreach my $midGroup (@{$midGroups}) {
+            print $fh "$midGroup\n";
+        }
+        print $fh "HERE_TERMINATOR\n";
+    }
+    
+    print $fh "create mid -file - << HERE_TERMINATOR\n";
+    print $fh join("\t", ("Name", "Sequence", "MidGroup")), "\n";
+    foreach my $midLine (@{$midData}, @{$xMidData}) {
+        my ($name, $sequence, $group) = @{$midLine};
+        print $fh join("\t", ($name, $sequence, $group)), "\n";
+    }
+    print $fh "HERE_TERMINATOR\n";
+}
+
+sub printCreateSamplesCmd {
+    my ($fh) = @_;
+    my ($midGroups, $midData, $xMidData) = &obtainMidData();
+    print $fh "create sample -file - << HERE_TERMINATOR\n";
+    print $fh "Name\n";
+    foreach my $rd (@rdFiles) {
+	if ($analysisMode eq 'STANDARD') {
+	    foreach my $assay (sort(keys %{$rdAssayMap{$rd}})) {
+		my @sampleMids = @{$defaultAssayData{$assay}{'sampleMids'}};
+		my @controlMids = @{$defaultAssayData{$assay}{'controlMids'}};
+		foreach my $ampGroup (sort(keys %{$defaultAssayData{$assay}{'amps'}})) {	
+		    
+		    foreach my $mid (@sampleMids) {
+			print $fh &generateSampleNameStandardForUsedMid($rd, $mid, $ampGroup), "\n";  
+		    }
+		    foreach my $mid (@controlMids) {
+			print $fh &generateSampleNameStandardForControl($rd, $mid, $ampGroup), "\n";  
+		    }
+		}
+	    }
+	} elsif ($analysisMode eq 'CUSTOM') {
+	    foreach my $midLine (@{$midData}) {		
+                my ($midName, $sequence, $group) = @{$midLine};
+		foreach my $assay (sort(keys %{$rdAssayMap{$rd}})) {
+		    foreach my $ampGroup (sort(keys %{$defaultAssayData{$assay}{'amps'}})) {	
+			print $fh &generateSampleNameStandardForUsedMid($rd, $midName, $ampGroup), "\n";
+		    } 
+		}
+            }
+            if ($xSamplesEnabled && @{$xMidData}) {
+                foreach my $xLine (@{$xMidData}) {
+                    my ($xName, $xSeq, $xGroup) = @{$xLine};
+		    foreach my $assay (sort(keys %{$rdAssayMap{$rd}})) {
+			foreach my $ampGroup (sort(keys %{$defaultAssayData{$assay}{'amps'}})) {
+			    print $fh &generateSampleNameCustomForUnusedMid($rd, $xName, $ampGroup), "\n";
+			}
+		    }
+                }
+            }
+	}	
+    }
+    print $fh "HERE_TERMINATOR\n";
+}
+
+sub leadingZeroPad {
+    
+    # Leading zero pad a number to a total length of $digits.
+    my ($num, $digits) = @_;
+    my $numLength = length($num);
+    my $diff      = $digits - $numLength;
+    $num = ('0' x $diff) . $num if ($diff);
+    return ($num);
+}
+
+sub printCreateMultiplexerCmd {
+    my ($fh) = @_;
+    print $fh "create multiplexer -file - << HERE_TERMINATOR\n";
+    print $fh "Name\tEncoding\n";
+    foreach my $rd (@rdFiles) {
+	foreach my $assay (sort(keys %{$rdAssayMap{$rd}})) {
+	    foreach my $ampGroup (sort(keys %{$defaultAssayData{$assay}{'amps'}})) {
+		print $fh &generateMultiplexerName($rd,$ampGroup), "\t", "either\n";
+	    }
+	}
+    }
+    print $fh "HERE_TERMINATOR\n";
+}
+
+sub parseReadDataName {
+    my ($rd) = @_;
+    
+    return ($rd =~ /^(\S+)(\d\d)$/);
+}
+
+sub printImportRdCmd {
+    my ($fh, $rdPath, $rdFilesRef) = @_;
+    my $linkState = ($linkSff ? 'true' : 'false');
+    
+    print $fh "create readGroup -file - << HERE_TERMINATOR\n";
+    print $fh "Name\n";
+    my %printedPrefix = ();
+    foreach my $rd (@rdFiles) {
+        my ($rdPrefix, $region) = &parseReadDataName($rd);
+        next if (exists($printedPrefix{$rdPrefix}));
+        print $fh "ReadGrp_${rdPrefix}\n";
+        $printedPrefix{$rdPrefix} = 1;
+    }
+    print $fh "HERE_TERMINATOR\n";
+    
+    print $fh "load -file - << HERE_TERMINATOR\n";
+    print $fh join("\t", ("SffDir", "SffName", "ReadGroup",
+			  "SymLink", "Name")), "\n";
+    
+    foreach my $rd (@{$rdFilesRef}) {
+        my ($rdPrefix, $ignorePrefix) = &parseReadDataName($rd);
+        print $fh join("\t", ("$rdPath", "${rd}.sff", "ReadGrp_${rdPrefix}",
+			      "$linkState", "$rd")), "\n";
+    }
+    print $fh "HERE_TERMINATOR\n";
+    
+    print $fh "update readData -file - << HERE_TERMINATOR\n";
+    print $fh "Name\tActive\n";
+    
+    foreach my $rd (@{$rdFilesRef}) {
+        print $fh "$rd\ttrue\n";
+    }
+    print $fh "HERE_TERMINATOR\n";
+}
+
+sub generateSampleNameStandardForUsedMid {
+    my ($readDataName, $midName, $ampGroup) = @_;
+    
+    my ($rdPrefix, $reg) = &parseReadDataName($readDataName);
+    my $sName = "${midName}_${ampGroup}_Reg${reg}_${rdPrefix}";
+    return ($sName);
+}
+
+sub generateSampleNameStandardForControl {
+    my ($readDataName, $midName, $ampGroup) = @_;
+    
+    my ($rdPrefix, $reg) = &parseReadDataName($readDataName);
+    my $sName = "${midName}_${ampGroup}_Reg${reg}_${rdPrefix}_NEG_CTRL";
+    return ($sName);
+}
+
+sub generateSampleNameCustomForUnusedMid {
+    my ($readDataName, $midName, $ampGroup) = @_;
+    
+    my ($rdPrefix, $reg) = &parseReadDataName($readDataName);
+    my $sName = "X_Sample_${midName}_${ampGroup}_Reg${reg}_${rdPrefix}";
+    return ($sName);
+}
+
+sub generateMidNameForMidNumber {
+    my ($midNumber) = @_;
+    return ("Mid" . $midNumber);
+}
+
+sub generateMultiplexerName {
+    my ($readDataName, $ampGroup) = @_;
+    my ($rdPrefix, $reg) = &parseReadDataName($readDataName);
+    return "Mult_${rdPrefix}_${ampGroup}_Reg${reg}";
+}
+
+sub printRdMuxMidSampAmpAssoc {
+    my ($fh) = @_;
+    my ($midGroups, $midData, $xMidData) = &obtainMidData();
+    print $fh "assoc -file - << HERE_TERMINATOR\n";
+    print $fh join("\t", ("ReadData", "Multiplexer", "Primer1Mid", "OfPrimer1MidGroup", "Primer2Mid", "OfPrimer2MidGroup", "Sample", "Amplicon")), "\n";
+    foreach my $rd (@rdFiles) {
+        if ($analysisMode eq 'STANDARD') {	    
+	    foreach my $assay (sort(keys %{$rdAssayMap{$rd}})) {
+		my @sampleMids = @{$defaultAssayData{$assay}{'sampleMids'}};
+		my @controlMids = @{$defaultAssayData{$assay}{'controlMids'}};
+		foreach my $ampGroup (sort(keys %{$defaultAssayData{$assay}{'amps'}})) {
+		    my $multiplexerName = 
+			&generateMultiplexerName($rd, $ampGroup);
+		    my @amps = @{$defaultAssayData{$assay}{'amps'}{$ampGroup}};
+		    foreach my $mid (@sampleMids) {
+			my $sampName = 
+			    &generateSampleNameStandardForUsedMid($rd, $mid, 
+								  $ampGroup);
+			foreach my $amp (@amps) {
+			    print $fh join("\t", ($rd, $multiplexerName, $mid, 
+						  $standardMidGroup, $mid,
+						  $standardMidGroup, $sampName,
+						  $amp)), "\n";
+			}
+		    }
+		    foreach my $mid (@controlMids) {
+			my $sampName = 
+			    &generateSampleNameStandardForControl($rd, $mid, 
+								  $ampGroup);  
+			foreach my $amp (@amps) {
+			    print $fh join("\t", ($rd, $multiplexerName, $mid, 
+						  $standardMidGroup, $mid,
+						  $standardMidGroup, $sampName,
+						  $amp)), "\n";
+			}
+		    }
+		}
+	    }
+        } elsif ($analysisMode eq 'CUSTOM') {
+	    foreach my $midLine (@{$midData}) {		
+                my ($midName, $sequence, $group) = @{$midLine};
+		foreach my $assay (sort(keys %{$rdAssayMap{$rd}})) {
+		    foreach my $ampGroup (sort(keys %{$defaultAssayData{$assay}{'amps'}})) { 
+			my $multiplexerName = 
+			    &generateMultiplexerName($rd, $ampGroup);
+			my @amps = 
+			    @{$defaultAssayData{$assay}{'amps'}{$ampGroup}};
+			my $sampName = 
+			    &generateSampleNameStandardForUsedMid($rd, 
+								  $midName,
+								  $ampGroup);
+			foreach my $amp (@amps) {
+			    print $fh join("\t", ($rd, $multiplexerName, 
+						  $midName, $group, $midName, 
+						  $group, $sampName, $amp)), 
+			    "\n";
+			}
+		    }
+		}
+            }
+            if ($xSamplesEnabled && @{$xMidData}) {
+                foreach my $xLine (@{$xMidData}) {
+                    my ($xName, $xSeq, $xGroup) = @{$xLine};
+		    foreach my $assay (sort(keys %{$rdAssayMap{$rd}})) {
+			foreach my $ampGroup (sort(keys %{$defaultAssayData{$assay}{'amps'}})) {
+			    my $multiplexerName = 
+				&generateMultiplexerName($rd, $ampGroup);
+			    my @amps = @{$defaultAssayData{$assay}{'amps'}{$ampGroup}};
+			    my $sampName = 
+				&generateSampleNameCustomForUnusedMid($rd, $xName, $ampGroup);
+			    foreach my $amp (@amps) {
+				print $fh join("\t", ($rd, $multiplexerName, 
+						      $xName, $xGroup, $xName,
+						      $xGroup, $sampName,
+						      $amp)), "\n";
+			    }
+			}
+		    }
+                }
+            }
+        }
+    }
+    print $fh "HERE_TERMINATOR\n";
+}

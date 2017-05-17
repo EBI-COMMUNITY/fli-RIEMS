@@ -1,0 +1,175 @@
+#!/usr/bin/perl
+#
+# Copyright (c) [2001-2008] 454 Life Sciences Corporation.
+# All Rights Reserved.
+#
+# A certain Software License Agreement between 454 Life Sciences Corporation 
+# (Licensor) and Licensee, as amended from time to time, governs the terms
+# and conditions of any permission of Licensee to use, copy, modify and 
+# distribute this software and its documentation (the "Software").
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND 
+# NONINFRINGEMENT.  
+#
+# IN NO EVENT SHALL LICENSOR BE LIABLE FOR ANY CLAIM, DAMAGES OR 
+# OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR 
+# OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE.
+#
+
+#
+# Check the input arguments.
+#
+my $numargs = scalar(@ARGV);
+if ($numargs < 1 || ($numargs >= 1 && $ARGV[0] =~ /^--help$/)) {
+    print STDERR "Usage:  sffrescore [-f] file/directory...\n";
+    print STDERR "           This perl script takes a list of directories or files,\n";
+    print STDERR "           identifies all of the SFF files in the directories/files\n";
+    print STDERR "           and rescores them in place, writing the new per-read quality\n";
+    print STDERR "           scores into the files.  No changes to the basecalls or reads are\n";
+    print STDERR "           made, but the existing file is overwritten with a new file\n";
+    print STDERR "           containing the new quality scores.\n";
+    print STDERR "           \n";
+    print STDERR "           Any SFF file which has already been rescored (either by this\n";
+    print STDERR "           command, the sfffile tool or the basecalling pipeline) will be\n";
+    print STDERR "           skipped (so, running the same command a second time will have\n";
+    print STDERR "           no effect on any files).  If the -f option is given, that will\n";
+    print STDERR "           force all SFF files to be rescored, even if they contain the\n";
+    print STDERR "           new quality scoring values.\n";
+    exit -1;
+}
+if ($numargs >= 1 && $ARGV[0] =~ /^--version$/) {
+	my @cmd=("sffinfo", "--version");
+	system @cmd;
+    exit -1;
+}
+
+my @filelist = ();
+my $filecnt = 0;
+my $errorFlag = 0;
+
+#
+# Check the command line arguments, use the find command to traverse the
+# directories, and check all regular files to identify SFF files (using
+# the magic number at the beginning of SFF files).
+#
+my $forceFlag = 0;
+my $inOptionFlag = 1;
+while (@ARGV) {
+    my $arg = shift @ARGV;
+
+    if ($inOptionFlag) {
+        if ($arg =~ /^-f$/) {
+            $forceFlag = 1;
+        }
+        $inOptionFlag = 0;
+        if ($forceFlag) {
+            next;
+        }
+    }
+
+    if (!(-e $arg)) {
+        print STDERR "Error:  Cannot find file/directory:  $arg\n";
+        $errorFlag = 1;
+    }
+
+    if ($errorFlag == 0) {
+        open(FILES, "find $arg -type f -print |");
+        while (<FILES>) {
+            chomp $_;
+            my $file = $_;
+            if ((-r $file)) {
+                #
+                # All true SFF files should begin with the bytes ".sff".
+                #
+                open(PREFIX, "<$file");
+                my $magicnumber = "";
+                my $num = read PREFIX, $magicnumber, 4, 0;
+                close(PREFIX);
+                if ($num == 4 && $magicnumber =~ /^.sff/) {
+                    #
+                    # Add each true SFF file to the filelist.
+                    #
+                    push @filelist, ($file);
+                    ++$filecnt;
+                }
+            }
+        }
+        close(FILES);
+    }
+}
+if ($errorFlag) {
+    exit -1;
+}
+if ($filecnt == 0) {
+    print STDERR "Warning:  No SFF files found in file/directory traversal.\n";
+    exit 0;
+}
+
+#
+# Run find to find all of the sff files in directory tree
+# of the input argument.
+#
+while (@filelist) {
+    my $file = shift @filelist;
+
+    #
+    # Skip logical links.
+    #
+    if (-l $file) {
+#        print "Skipping '$file': logical link\n";
+        next;
+    }
+
+    #
+    # Run sffinfo for each file, to see if it is an sff file
+    # and whether it has already been rescored.
+    #
+    unless (open(INFO, "sffinfo -m $file |")) {
+        print "Error:  Unable to execute sffinfo command\n";
+        exit -1;
+    }
+    my $found = 0;
+    while (<INFO>) {
+        if ($_ =~ /<qualityScoreVersion>/) {
+            $found = 1;
+            break;
+        }
+    }
+    close(INFO);
+    if ($? != 0) {
+        print "Skipping '$file': not an SFF file\n";
+        next;
+    }
+
+    if ($found && !$forceFlag) {
+        print "Skipping '$file': already rescored\n";
+    } else {
+        #
+        # Run sfffile to rescore the file into a temp file,
+        # then overwrite the existing file.
+        #
+        my $origsize = (-s $file);
+        print "Rescoring '$file':\n";
+        my $tmpfile = $file . ".tmprescore";
+        my @cmd = ("sfffile", "-r", "-o", $tmpfile, $file);
+        my $status = system @cmd;
+        if ($status != 0) {
+            print "  Error:  sfffile returned non-zero status.\n";
+            exit -1;
+        } elsif (-s $tmpfile < $origsize - 10) {
+            print "  Error:  sfffile unable to write new file.  It likely ran out of disk space.\n";
+            unlink $tmpfile;
+            exit -1;
+        } else {
+            my @cmd2 = ("mv", "-f", $tmpfile, $file);
+            if (system(@cmd2) != 0) {
+                print "  Error:  Unable to overwrite SFF file.\n";
+            }
+        }
+    }
+}
+close(FILES);
+
