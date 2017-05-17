@@ -1,0 +1,2998 @@
+#!/usr/bin/perl -w
+## Copyright (c) [2010-2014] 454 Life Sciences Corporation.
+## All Rights Reserved.
+##
+## FOR LIFE SCIENCE RESEARCH ONLY.
+## NOT FOR USE IN DIAGNOSTIC PROCEDURES.
+##
+## THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+## EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+## OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+## NON-INFRINGEMENT.
+##
+## IN NO EVENT SHALL 454 LIFE SCIENCES CORPORATION OR ANY OTHER
+## ROCHE COMPANY BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, 
+## WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+## OUT OF OR IN CONNECTION WITH THE SOFTWARE.
+##
+
+use strict;
+use Getopt::Long;
+use Time::Local;
+use FileHandle;
+use File::Basename;
+use Cwd 'abs_path';
+$| = 1;
+
+my $softwareName = "GType HLA";
+my $tagInfo      = "v20140311_1427";
+my $version      = "2.3";
+
+# Variables required for usage statement
+my $expectedVer = '2.3';
+my $ruoMsg = "FOR LIFE SCIENCE RESEARCH ONLY\nNOT FOR USE IN DIAGNOSTIC PROCEDURES\n";
+
+# Program usage statement
+
+sub basicUsage {
+    print STDERR <<BASIC_USAGE_TERMINATOR;
+USAGE
+   $0 (--dd <dataDirectory> | --sd <sffDirectory>)
+       [--od <outputDirectory>]
+       [--wad <workAreaDirectory>]
+       [--fromPipeline <true|false>]
+       [--linkSff <true|false>]
+       [--doCleanup <true|false>]
+       [[--sip <softwareInstallPath>] | [--dap <doAmpliconPath>]]
+       [--includeKey]
+       [--cpu <numberOfCpusToUse>]
+       [--verbose]
+       [--version]
+       [--help]
+
+    Items in [brackets] are optional. Lists of items separated by the vertical
+    bar | indicate that one and only one of the items should be used at a time.
+    The options --version and --help are stand-alone options that should not
+    be combined with any other options.
+
+BASIC_USAGE_TERMINATOR
+}
+
+sub advancedUsage {
+    print STDERR <<ADVANCED_USAGE_TERMINATOR
+ADVANCED USAGE
+   $0 (--dd <dataDirectory> | --sd <sffDirectory>)
+	   ([--pd <projectDirectory>] | 
+	     ([--od <outputDirectory>] [--wad <workAreaDirectory>]))
+	   [--fromPipeline <true|false>]
+	   [--linkSff <true|false>]
+	   [--doCleanup <true|false>]
+	   [[--sip <softwareInstallPath>] | [--dap <doAmpliconPath>]]
+	   [--includeKey]
+	   [--cpu <numberOfCpusToUse>]
+	   [--verbose]
+	   [--version] 
+       [--help]
+       [--setup]
+       [--compute]
+	   [--report]
+	   [--overwriteEnabled]
+	   [--allowMixedSFF]
+	   [--researcherRun]
+	   [--groupBy <readData|sample>]
+	   [--splitBy <strand|amp|none>]
+       [--advancedHelp]
+
+    Items in [brackets] are optional. Lists of items separated by the vertical
+    bar | indicate that one and only one of the items should be used at a time.
+    The options --version, --help and --advancedHelp are stand-alone options 
+    that should not be combined with any other options.
+    
+    The options "--pd", all those listed from "--setup" to "--advancedHelp" are
+    advanced/extra features that are not officially supported as part of the
+    this software release.
+
+ADVANCED_USAGE_TERMINATOR
+}
+
+sub basicUsageAndDie {
+    &basicUsage();
+    print STDERR "\n$ruoMsg\n";
+    exit(1);
+}
+
+sub advancedUsageAndDie {
+    &advancedUsage();
+    print STDERR "\n$ruoMsg\n";
+    exit(1);
+}
+
+sub basicHelp {
+    &basicUsage();
+    &basicHelpDescription();
+    print STDERR "\n$ruoMsg\n";
+}
+
+sub advancedHelp {
+    &advancedUsage();
+    &advancedHelpDescription();
+    print STDERR "\n$ruoMsg\n";
+}
+
+sub basicHelpDescription {
+    &basicHelpScriptDescription();
+    &basicHelpOptDescriptions();
+    &basicHelpExample();
+    &basicHelpTail();
+}
+
+sub advancedHelpDescription {
+    &advancedHelpScriptDescription();
+    &advancedHelpOptDescriptions();
+    &advancedHelpExample();
+    &advancedHelpTail();
+}
+
+sub basicHelpScriptDescription {
+    print STDERR <<BASIC_HELP_TERMINATOR;
+DESCRIPTION 
+
+    This program post-processes the basecalling of reads, that were sequenced
+    using the GType HLA primer set, in order to improve read accuracy and
+    simplify the computational effort required for any subsequent HLA
+    genotyping analysis. This post-processing involves using the Amplicon 
+    Variant Analyzer (AVA) software to create consensus reads that are then
+    replicated in proportion to the number of constituent individual reads,
+    while simultaneously replacing the 5-prime primer regions and MIDs with 
+    idealized sequence content.  The AVA Command Line Interface (CLI) must be
+    available for this program to function.
+    
+OPTIONS
+BASIC_HELP_TERMINATOR
+}
+
+sub advancedHelpScriptDescription {
+    &basicHelpScriptDescription();
+}
+
+sub basicHelpOptDescriptions {
+    print STDERR <<BASIC_HELP_TERMINATOR;
+
+     --dd, --dataDir <dataDirectory>     
+         The location of the standard "D_" directory for a sequencing run that
+         contains the SFF files to analyze in its "sff" subdirectory
+
+     --sd, --sffDir <sffDirectory>     
+         The location of a directory containing the SFF files to analyze.
+           	
+     --od, --outputDir <outputDirectory>     
+         The directory where the analysis results should be written.
+     	
+     --wad, --workAreaDir <workAreaDirectory>
+         The directory where the program can output intermediate files during
+         computation.   If not specified, defaults to the same location as
+         the output directory.
+     
+     --fp, --fromPipeline  ( true | false )
+         When this option is set to true it signals the script to exhibit 
+         pipeline-specific behavior like split logging to STDOUT and 
+         STDERR.  It also sets the default for --linkSff to true. 
+
+     --ls, --linkSff ( true | false )     
+         Determine if the SFF files imported as Read Data into the AVA project
+         should be symbolic links rather than true file copies.  If not
+         specified, defaults to same value as --fromPipeline (i.e., true if
+         --fromPipeline is true, and false otherwise).
+
+     --dc, --doCleanup  ( true | false )
+         Determine if the AVA project computed to process the data is erased
+         at the end of the process.  Defaults to false.
+
+     --sip, --softwareInstallPath <softwareInstallPath>
+         The path to the 454 Software installation such as /opt/454/.  This is
+         used to help locate the appropriate version of doAmplicon.  May be
+         used instead of --doAmpliconPath (--dap).
+
+     --dap, --doAmpliconPath <doAmpliconPath>     
+         The explicit path to the doAmplicon command to use when invoking the
+         AVA sofware. If neither the softwareInstallpath (--sip) nor the
+         doAmpliconPath (--dap) are provided, the program will search for
+         doAmplicon and report an error if it can not find one. If an explicit
+         doAmplicon path is provided, and the corresponding AVA version is
+         incorrect, the script will assume that processing is being forced
+         with an older version of the software that may or may not work; a
+         warning will be provided, and the processing will be attempted. The
+         data should eventually be reprocessed using the proper version of the
+         software.
+
+     --ik, --includeKey
+         If provided, the output will include the sequencing key as
+         the first four bases of the post-processed basecalls.  The default
+         behavior is to not include this key, but to start each read with the
+         MID sequence followed by the target-specific primer.
+         
+     --cpu <numberOfCpusToUse>
+         An integer specifying the number of processors to use, in parallel,
+         during the AVA computation.  If not given, defaults to 1.  The special
+         value 0 may be given to indicate that all processors be used.
+         
+     --verbose
+         Allows additional messages involving Debugging or Tracing to be
+         displayed and written to the log file. 
+
+     --version
+         Displays a version string for this program. 
+
+     --h, --help     
+         Display this help message.
+BASIC_HELP_TERMINATOR
+}
+
+sub advancedHelpOptDescriptions {
+    &basicHelpOptDescriptions();
+    print STDERR <<ADVANCED_HELP_TERMINATOR;
+
+     --pd, --projectDir <projectDirectory>
+         Provide the path to an AVA project to use for the computation.  When
+         using the --setup action flag, the project may not already exist
+         unless	the --overwriteEnabled flag is also used to allow it to be
+         overwritten. When using the --compute and/or --report action flags,
+         without a --setup flag at the same time, the AVA project must already
+         exist. Results files, logs, and scripts are written to the same
+         directory containing the AVA project and are named as suffixed forms
+         of the project name. Use of --pd sets the default for --dc to false.
+
+     --setup
+         Assert finer control over the computation process and only set up the
+         AVA project with Read Data (SFF files) specified via the --dd or --sd
+         options, but perform no computation unless the --compute option is
+         also specified.
+     	
+     --compute     
+         Compute the specified AVA project (which may have just been created
+         via the --setup option, but which may have also already existed).
+
+     --report
+         Produce computation output based on an AVA project that has already
+         been computed (or which may have just been computed by also specifying
+         the --compute option).
+                                      
+     --oe, --overwriteEnabled     
+         As a safety measure, the program will not overwrite pre-existing AVA
+         projects or output files unless this flag is used to allow
+         overwriting.
+         
+     --allowMixedSFF
+         Allow the use of SFF files from different sequencing runs, so long as
+         the SFF files represent disjoint regions.
+         
+     --rr, --researcherRun
+        Run in "Researcher Run" mode, rather than in the default "Study
+        Run" mode.  This enables the AVA project to handle extra MIDs.
+
+     --gb, --groupBy ( readData | sample )
+         The output can be grouped into files by either Read Data or by Sample.
+         The option defaults to "readData" (i.e. SFF file) if not provided. 
+
+     --sb, --splitBy ( strand | amp | none )
+         The output that has been grouped by Read Data or Sample can be further
+         split by either Strand or Amplicon.  The default is "none" if the
+         option is not provided.
+
+     --ah, --advancedHelp
+         Show this help message including advanced options.
+ADVANCED_HELP_TERMINATOR
+}
+
+sub basicHelpExample {
+    print STDERR <<BASIC_HELP_TERMINATOR;
+
+EXAMPLE
+
+    Provided that the user has write permission to the D_ directory and that 
+    version $expectedVer or higher of AVA is installed, the simplest invocation
+    of this program to fully process a GType HLA run would simply be to specify
+    the D_ directory as input. An example command might look like:
+	
+% $0 -dd /data/2010_12_08/R_2010_12_08_11_49_30_rig3_user_annotation/D_2010_12_08_12_29_02_frontend2_signalProcessingAmplicons/ 
+
+    (NOTE: in this example the % represents the command line prompt and is not
+    part of the actual command issued by the user.  Also, all the command line
+    arguments are on a single line, including the path to the Run Directory,
+    even though the text may be split across multiple lines in the formatting
+    of this documentation.)	
+	
+    The command above would create an Extra Processing (or E_ directory) within
+    the D_ directory provided via the --dd parameter. The E_ directory would
+    look something like "E_2010_12_05_20_19_09_GTypeHLA" (where the numbers are
+    derived from the date and time the program was run).  While processing the
+    data, an AVA project gets created within the E_ directory.  This
+    project will be retained, by default, after the final output files are
+    generated. The above command would result in files/directories being 
+    created in the following location: 
+
+/data/
+ 2010_12_08/
+   R_2010_12_08_11_49_30_rig3_user_annotation/
+     D_2010_12_08_12_29_02_frontend2_signalProcessingAmplicons/
+          E_2010_12_08_20_19_09_GTypeHLA/
+               AVA_Project_2010_12_08_20_19_09_GTypeHLA/
+               fasta/
+                    GRBZB5L01.fna
+                    GRBZB5L02.fna
+                    GRBZB5L03.fna
+                    GRBZB5L04.fna
+               GTypeHLA_analysis.log
+
+    If this script was run with "--doCleanup true", the AVA project would have
+    been deleted to conserve space. 
+
+    If the user does not have write access to the D_ directory, they can use
+    the --outputDir option to specify an alternate directory to contain
+    the E_ directory.  If the E_ directory is going to be stored separately
+    from the D_ directory like this, and if the AVA projects are being kept,
+    setting --linkSff to false would be advisable (since, if the D_ directory
+    gets archived and moved/deleted, it would break the symbolic links in the
+    AVA projects). 
+
+    The FASTA files in the E_ directory are the post-processed basecalled
+    reads, ready for genotyping analysis.  The files are of a standard FASTA
+    format with a definition line for each entry beginning with a ">" with
+    blocks of nucleotide sequence as the body of each entry. Here is an
+    example entry:
+
+>C_29_GRBZB5L01A1GH4 sample="GRBZB5L_01_Samp_01" amplicon="DQA1-2" strand=+ insertLen=370
+ACGAGTGCGTGTTTCTTCCATCATTTTGTGTATTAAGGTTCTTTATTCCCCTGTTCTCTG
+CCTTCCTGCTTGTCATCTTCACTCATCAGCTGACCATGTTGCCTCTTACGGTGTAAACTT
+GTACCAGTCTTATGGTCCCTCTGGGCAGTACAGCCATGAATTTGATGGAGACGAGGAGTT
+CTATGTGGACCTGGAGAGGAAGGAGACTGTCTGGCAGTTGCCTCTGTTCCGCAGATTTAG
+AAGATTTGACCCGCAATTTGCACTGACAAACATCGCTGTGCTAAAACATAACTTGAACAT
+CGTGATTAAACGCTCCAACTCTACCGCTGCTACCAATGGTATGTGTCCACCATTCTGCCT
+TTCTTTACTGATTTATCCCTTTATACCAAGTTTCATTATTTTCTTTCCA
+
+    The definition line consists of a sequence entry ID followed by 4
+    keyword=value annotations (sample, amplicon, strand, and insertLen).
+    The sample and amplicon values are double-quoted. InsertLen is the length
+    of the displayed sequence less the MID and primer added to the 5-prime end
+    and represents the portion of the sequence that was actually part of the
+    primer-trimmed alignment of the read within AVA.
+
+    The general form of the sequence entry ID is:
+
+		C_n_IndividualReadAccno 
+
+    Where the n indicates the n-th Consensus processed within the project 
+    (a unique numeric identifier that numbers the consensus reads from 1 to the
+    total number of consensus reads in all of the alignments being output from
+    the AVA project, regardless of region) and IndividualReadAccno is an 
+    original read accno as seen in the SFF file that contributed to that
+    specific Consensus Read. For a given consensus sequence, the sequence gets
+    cloned into as many entries with identical sequence content as there are
+    individual reads that contributed to the consensus.
+BASIC_HELP_TERMINATOR
+}
+
+sub advancedHelpExample {
+    &basicHelpExample();
+}
+
+sub basicHelpTail {
+    print STDERR "\n";
+}
+
+sub advancedHelpTail {
+    print STDERR <<ADVANCED_HELP_TERMINATOR;
+
+    The three advanced action flags (--setup, --compute, and --report) are
+    only needed if the user desires to split the process into steps. If none
+    of the flags are provided, the program assumes you want the default, which
+    is complete processing (as if all three flags were supplied). If the flags
+    are used, they may be used separately or in combination as long as they
+    make logical sense (--setup and --report can not be used as a pair since
+    reporting requires that the project be computed).
+	
+ADVANCED_HELP_TERMINATOR
+}
+
+# Global variables with defaults.
+
+my $expectedMidCount  = 11;
+my $analysisTypeLabel = "GTypeHLA";
+my $defaultCPUValue   = 1;
+
+
+my @preferredBinDirs = (
+    '/opt/454/apps/amplicons/bin/', '~/454/apps/amplicons/bin/',
+    './454/apps/amplicons/bin/',    '/opt/454*/apps/amplicons/bin/',
+    '~/454*/apps/amplicons/bin/',   './454*/apps/amplicons/bin/',
+    '/opt/*/apps/amplicons/bin/',   '~/*/apps/amplicons/bin/',
+    './*/apps/amplicons/bin/'
+);
+
+my @validCols = ( 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 );
+my %col2Mid = (
+    "1"  => "1",
+    "2"  => "3",
+    "3"  => "4",
+    "4"  => "6",
+    "5"  => "7",
+    "6"  => "8",
+    "7"  => "9",
+    "8"  => "10",
+    "9"  => "13",
+    "10" => "16",
+    "11" => "11"
+);
+
+# The following empty array is reserved for future functionality.
+my @unusedMids = ();
+# The following MIDs are not utilized in plates 
+# for projects processed by this script.
+#my @unusedMids = ( '2', '5', '12', '14', '15' );
+
+my %validLogClasses = (
+    "Fatal"       => "1",
+    "Critical"    => "1",
+    "Error"       => "1",
+    "Warning"     => "1",
+    "Notice"      => "1",
+    "Information" => "1",
+    "Debug"       => "1",
+    "Trace"       => "1"
+);
+
+# Input option variables
+my $projectDir          = "";
+my $dataDir             = "";
+my $sffDir              = "";
+my $doAmpPath           = "";
+my $doAmpVer            = "";
+my $softwareInstallPath = "";
+my $setup               = "";
+my $compute             = "";
+my $report              = "";
+my $overwriteEnabled    = "";
+my $isResearcherRun     = 0;
+my $groupBy             = "";
+my $splitBy             = "";
+my $includeKey          = "";
+my $showHelp            = 0;
+my $linkSff             = 0;
+my $fromPipeline        = 0;
+my $outputDir           = "";
+my $workAreaDir         = "";
+my $doCleanup           = 0;
+my $allowMixedSFF       = 0;
+my $showVersion         = 0;
+my $verbose             = 0;
+my $showAdvancedHelp    = 0;
+my $cpu                 = undef;
+my $commandLine         = join( " ", ( $0, @ARGV ) );
+
+# Obtain command line parameters
+GetOptions(
+    'projectDir|pd=s'           => \$projectDir,
+    'dataDir|dd=s'              => \$dataDir,
+    'sffDir|sd=s'               => \$sffDir,
+    'doAmpliconPath|dap=s'      => \$doAmpPath,
+    'softwareInstallPath|sip=s' => \$softwareInstallPath,
+    'outputDir|od=s'            => \$outputDir,
+    'workAreaDir|wad=s'         => \$workAreaDir,
+    'setup'                     => \$setup,
+    'compute'                   => \$compute,
+    'report'                    => \$report,
+    'fromPipeline|fp=s'         => \$fromPipeline,
+    'cpu=s'                     => \$cpu,
+    'version'                   => \$showVersion,
+    'verbose'                   => \$verbose,
+    'linkSff|ls=s'              => \$linkSff,
+    'doCleanup|dc=s'            => \$doCleanup,
+    'allowMixedSFF|ams'         => \$allowMixedSFF,
+    'overwriteEnabled|oe'       => \$overwriteEnabled,
+    'researcherRun|rr'          => \$isResearcherRun,
+    'groupBy|gb=s'              => \$groupBy,
+    'splitBy|sb=s'              => \$splitBy,
+    'includeKey|ik'             => \$includeKey,
+    'help|h'                    => \$showHelp,
+    'advancedHelp|ah'           => \$showAdvancedHelp,
+) or &basicUsageAndDie();
+
+my $hasOpt = 0;
+&countOpts();
+
+sub countOpts {
+
+    # Keep a count of how many explicit options have been provided by the user.
+    $hasOpt += 1 if ($projectDir);
+    $hasOpt += 1 if ($dataDir);
+    $hasOpt += 1 if ($sffDir);
+    $hasOpt += 1 if ($doAmpPath);
+    $hasOpt += 1 if ($softwareInstallPath);
+    $hasOpt += 1 if ($outputDir);
+    $hasOpt += 1 if ($workAreaDir);
+    $hasOpt += 1 if ($setup);
+    $hasOpt += 1 if ($compute);
+    $hasOpt += 1 if ($report);
+    $hasOpt += 1 if ($fromPipeline);
+    $hasOpt += 1 if (defined($cpu));
+    $hasOpt += 1 if ($showVersion);
+    $hasOpt += 1 if ($verbose);
+    $hasOpt += 1 if ($linkSff);
+    $hasOpt += 1 if ($doCleanup);
+    $hasOpt += 1 if ($allowMixedSFF);
+    $hasOpt += 1 if ($overwriteEnabled);
+    $hasOpt += 1 if ($isResearcherRun);
+    $hasOpt += 1 if ($groupBy);
+    $hasOpt += 1 if ($splitBy);
+    $hasOpt += 1 if ($includeKey);
+    $hasOpt += 1 if ($showHelp);
+    $hasOpt += 1 if ($showAdvancedHelp);
+}
+
+# Global variables to be derived from command line parameters
+my $reportFile      = "";
+my $rdPath          = "";
+my @rdFiles         = ();
+my $projName        = "";
+my $eDirName        = "";
+my $outputDirParent = "";
+my $outputDirFasta  = "";
+my $isClassicMode   = 0;
+my $gsAmpPath       = "";
+my $logFile         = "";
+my $logFH           = undef;
+
+# Global variables for tracking command line parameter processing.
+my @problems = ();
+my @notes    = ();
+
+# Global variables for setup content
+my %allAmpData      = ();
+my %allMidData      = ();
+my %sampleAmpData   = ();
+my %alignData       = ();
+my %newOldSamp      = ();
+my $outDirDumper    = "";
+my %outFh           = ();
+my $masterCounter   = 0;
+my $groupByReadData = 0;
+my $groupBySample   = 0;
+my $splitByStrand   = 0;
+my $splitByAmp      = 0;
+my $seqKey          = "tcag";
+my $reportVariants  = 0;
+my $moduleName      = basename($0);
+
+# Validate the command line parameter input
+
+# First check the stand-alone options that shouldn't be mixed with
+# other options
+&checkVersion();
+&checkHelpFlag();
+&checkAdvancedHelpFlag();
+
+# The fromPipeline should be checked next because it influences some defaults..
+&checkFromPipeline();
+
+# These parameter checks are independent and order shouldn't matter.
+&checkCpu();
+&checkVerbose();
+&checkLinkSff();
+&checkOverwriteFlag();
+&checkGroupBy();
+&checkSplitBy();
+&checkIncludeKey();
+&checkResearcherRun();
+&checkAllowReadDataSupersets();
+
+# These two checks must be done in this order.
+&checkDoAmpLocation();
+&checkGsAmp();
+
+# These four checks should be done in this order.
+&checkActions();
+&checkDataLocation();
+&checkOutputOptions();
+&validateActions();
+&checkDoCleanup();
+
+# Display the usage statement if no options have been provided
+# or if any problems were encountered when validating the command
+# line parameters.
+if ( @problems && $hasOpt || !$hasOpt ) {
+    &basicUsage();
+}
+
+# Report command line parameter problems
+if ( $hasOpt && @problems ) {
+
+    # Only report problems if the user has attempted to supply a
+    # command line option. If the user supplies no options, assume
+    # they are not actually running the program and want to see
+    # a clean usage statement instead.
+
+    my $errLine = join( "\n\n", (@problems) );
+    $errLine = "Execution Problems:\n\n${errLine}\n\n";
+    &logLine($errLine);
+
+}
+
+# &checkLog can involve creation of an output directory. That is why
+# it is called here after it has been established that there are no other
+# command line issues. However, the creation of the log file can fail.
+# This failure will be evident by the $logFH not being set to undef.
+&checkLog() if ( !@problems );
+
+# Display notes after problems have been reported so they
+# will be visible to users at the bottom of the screen.
+if (@notes) {
+    my $noteLine = join( "\n\n", (@notes) );
+    $noteLine = "NOTE:\n\n${noteLine}\n\n";
+    &logLine($noteLine);
+}
+
+# Display a notice about the specific programs being used to process the data.
+&logLine(
+    join( "\n",
+"Without an override, the following doAmplicon program is the current choice",
+        "to be used for command line processing ($doAmpVer):",
+        "\n$doAmpPath\n\n" )
+);
+&logLine(
+    join( "\n",
+"The following gsAmplicon program would be appropriate to use to examine the",
+        "AVA project with the GUI:\n$gsAmpPath\n\n" )
+) if ( !$doCleanup && !@problems);
+
+if ( !$hasOpt || @problems || !$logFH ) {
+    if (!$hasOpt && !$logFH) {
+	print STDERR "\n$ruoMsg\n";
+    }
+    # If no options have been provided or problems
+    # have been encountered, exit the script.
+    exit(1);
+}
+
+&loadProjData() if ($report);
+
+# Setup the AVA project if requested by --setup flag.
+&executeActionIfNeeded('setup');
+
+# Run the computation for the AVA project if requested by --compute flag.
+&executeActionIfNeeded('compute');
+
+# Dump a variantHits report for the AVA project
+# if requested by the --report flag.
+&executeActionIfNeeded('report');
+
+if ($doCleanup) {
+    &executeLinuxCmdAndTrapErrors("rm -rf $projectDir") if ( -e $projectDir );
+}
+
+# Signal that the script processing is complete.
+&logLine("All script processing is complete.\n\n");
+
+# Exit with a return code of 0 for a successful run.
+exit(0);
+
+# Script subroutines
+
+sub checkOutputOptions {
+    &checkProjectDir();
+    &checkOutputDir();
+    &checkWorkAreaDir();
+
+    if ( $projectDir && $workAreaDir && $outputDir ) {
+        push( @problems,
+"The --projectDir (--pd) cannot be combined with either the --workAreaDir (--wad) or --outputDir (--od) options.\n"
+        );
+    } elsif ( $projectDir && $workAreaDir && !$outputDir ) {
+        push( @problems,
+"The --projectDir (--pd) and the --workAreaDir (--wad) options cannot be specified at the same time.\n"
+        );
+    } elsif ( $projectDir && !$workAreaDir && $outputDir ) {
+        push( @problems,
+"The --projectDir(--pd) and the --outputDir (--od) options cannot be specified at the same time.\n"
+        );
+    } elsif ( $projectDir && !$workAreaDir && !$outputDir ) {
+
+        # Use the directory containing $projectDir as a
+        # $workAreaDir and an $outputDir. Use project name as a
+        # prefix for output. This is classic manual mode as
+        # opposed to newer pipeline style.
+        $isClassicMode = 1;
+        $reportFile    = $projectDir . '.variantHits.report.txt';
+        $logFile       = $projectDir . '.logFile.txt';
+        ($projName) = ( $projectDir =~ /([^\/]+)$/ );
+        my $pDir = $projectDir;
+        $pDir =~ s/$projName$//;
+        if ( !$pDir ) {
+            $pDir = './';
+        }
+        $workAreaDir    = $pDir;
+        $outputDir      = $pDir;
+        
+        $outputDirFasta = $projectDir;
+        $outputDirFasta =~ s/\/$//;
+	
+    	if ($groupBySample) {
+    	    $outputDirFasta .= "_sample_consensus_fasta";
+    	}
+    	elsif ($groupByReadData) {
+    	    $outputDirFasta .= "_readData_consensus_fasta";
+    	}
+    	if ($splitByStrand) {
+    	    $outputDirFasta .= "_by_strand";
+    	}
+    	elsif ($splitByAmp) {
+    	    $outputDirFasta .= "_by_amp";
+    	}
+    } elsif ( !$projectDir && $workAreaDir && $outputDir ) {
+
+        # Use the $workAreaDir to construct the $projectDir.
+        &getExtraProcessingDirName();
+        &getAvaProjNameFromEDirName();
+        $projectDir      = "${workAreaDir}/${projName}";
+        $outputDirParent = $outputDir;
+        $outputDir       = "${outputDir}/${eDirName}";
+        $outputDirFasta  = $outputDir . '/fasta';
+        $reportFile      = "${outputDir}/${projName}.variantHits.report.txt";
+        $logFile         = "${outputDir}/${analysisTypeLabel}_analysis.log";
+    } elsif ( !$projectDir && $workAreaDir && !$outputDir ) {
+
+        # Use the $workAreaDir to construct the $projectDir.
+        # Set a default for $outputDir.
+        &getExtraProcessingDirName();
+        &getAvaProjNameFromEDirName();
+        $projectDir = "${workAreaDir}/${projName}";
+        &getDefaultOutputDir();
+        $reportFile = "${outputDir}/${projName}.variantHits.report.txt";
+        $logFile    = "${outputDir}/${analysisTypeLabel}_analysis.log";
+    } elsif ( !$projectDir && !$workAreaDir && $outputDir ) {
+
+        # Use $outputDir to construct $projectDir and $workAreaDir.
+        &getExtraProcessingDirName();
+        &getAvaProjNameFromEDirName();
+        $outputDirParent = $outputDir;
+        $outputDir       = "${outputDir}/${eDirName}";
+        $outputDirFasta  = $outputDir . '/fasta';
+        $workAreaDir     = $outputDir;
+        $projectDir      = "${workAreaDir}/${projName}";
+        $reportFile      = "${outputDir}/${projName}.variantHits.report.txt";
+        $logFile         = "${outputDir}/${analysisTypeLabel}_analysis.log";
+    } elsif ( !$projectDir && !$workAreaDir && !$outputDir ) {
+
+        # Set a default for $outputDir. Use that default to set
+        # $projectDir and $workAreaDir.
+        &getExtraProcessingDirName();
+        &getAvaProjNameFromEDirName();
+        &getDefaultOutputDir();
+        $workAreaDir = $outputDir;
+        $projectDir  = "${workAreaDir}/${projName}";
+        $reportFile  = "${outputDir}/${projName}.variantHits.report.txt";
+        $logFile     = "${outputDir}/${analysisTypeLabel}_analysis.log";
+    }
+    &writeTestDirs();
+}
+
+sub writeTestDirs {
+
+    # The messages being pushed onto the @problems array could be potentially
+    # confusing to the user because they refer to the directories in terms of
+    # the command line flags that could set them, but some may have been
+    # derived via computation from other parameters that
+    # actually were supplied.
+
+    if ( $isClassicMode && $projectDir ) {
+        my $parentDir =
+          ( -e $projectDir ? abs_path($projectDir) : $projectDir );
+        $parentDir = dirname($parentDir);
+        if ( !-e $parentDir ) {
+            push( @problems,
+"The parent directory for the project ($parentDir) does not exist. Supply an alternate --projectDir."
+            );
+        } elsif ( !-d $parentDir ) {
+            push( @problems,
+"The parent directory for the project ($parentDir) exists but is not a directory. Supply an alternate --projectDir."
+            );
+        } elsif ( !-w $parentDir ) {
+            push( @problems,
+"You do not have permission to write to the parent directory for the project ($parentDir). Supply an alternate --projectDir."
+            );
+        }
+    } elsif ( !$isClassicMode && $outputDirParent ) {
+        if ( !-e $outputDirParent ) {
+            my $parentDir = dirname($outputDirParent);
+            if ( !-e $parentDir ) {
+                push( @problems,
+"The parent directory of the --outputDir provided ($parentDir) does not exist. Provide an alternate --outputDir."
+                );
+            } elsif ( !-d $parentDir ) {
+                push( @problems,
+"The parent directory of the --outputDir provided ($parentDir) exists but is not a directory. Provide an alternate --outputDir."
+                );
+            } elsif ( !-w $parentDir ) {
+                push( @problems,
+"You do not have permission to write to the parent directory of the --outputDir provided ($parentDir). Provide an alternate --outputDir."
+                );
+            }
+        } elsif ( !-d $outputDirParent ) {
+            push( @problems,
+"The --outputDir provided ($outputDirParent) exists but is not a directory. Provide an alternate --outputDir."
+            );
+        } elsif ( !-w $outputDirParent ) {
+            push( @problems,
+"You do not have permission to write to the --outputDir provided ($outputDirParent). Provide an alternate --outputDir."
+            );
+        }
+    }
+}
+
+sub checkProjectDir {
+
+    # The projectDir is mandatory and is used as the basis
+    # for output file names. If the setup flag is being used
+    # and the project already exists, the overwriteEnabled
+    # flag needs to be used (to make sure the user really
+    # wants to overwrite the project).
+    if ($projectDir) {
+
+        # Remove trailing slash to facilitate use as a file name prefix.
+        $projectDir =~ s/\/+$//;
+        if ( $projectDir !~ /\w+/ ) {
+            push( @problems, "Improper --projectDir (--pd) provided." );
+        }
+    }
+}
+
+sub checkOutputDir {
+    if ($outputDir) {
+
+        # Remove trailing slash to facilitate use as a file name prefix.
+        $outputDir =~ s/\/+$//;
+    }
+}
+
+sub checkWorkAreaDir {
+    if ($workAreaDir) {
+
+        # Remove trailing slash to facilitate use as a file name prefix.
+        $workAreaDir =~ s/\/+$//;
+        if ( !-e $workAreaDir || !-d $workAreaDir || !-w $workAreaDir ) {
+            push( @problems,
+"The --workAreaDir (--wad) must be an existing directory where the script user has write access."
+            );
+        }
+    }
+}
+
+sub getDefaultOutputDir {
+    my $localRdPath = $rdPath;
+    if ( !$localRdPath ) {
+
+        # If no rdPath has been provided or has passed validation,
+        # spoof a local subdirectory for the purposes of allowing
+        # output dirs to be constructed.
+        $localRdPath = './sff/';
+        $dataDir     = './';
+    }
+
+    # Remove trailing slash
+    $localRdPath =~ s/\/+$//;
+    $outputDir = $localRdPath;
+
+    # Get parent directory.
+    $outputDir = dirname($outputDir);
+
+    # Add trailing slash
+    $outputDir .= '/';
+
+    # Record parent directory
+    $outputDirParent = $outputDir;
+
+    # Construct final output directory
+    $outputDir .= $eDirName;
+    $outputDirFasta = $outputDir . '/fasta';
+}
+
+sub getExtraProcessingDirName {
+    my ( $sec, $min, $hour, $mday, $mon, $year, $wday, $yday, $isdst ) =
+      localtime(time);
+    $year += 1900;
+    $mon  += 1;
+    $mon  = &leadingZeroPad( $mon,  2 );
+    $mday = &leadingZeroPad( $mday, 2 );
+    $hour = &leadingZeroPad( $hour, 2 );
+    $min  = &leadingZeroPad( $min,  2 );
+    $sec  = &leadingZeroPad( $sec,  2 );
+    my $eDir = join( "_",
+        ( 'E', $year, $mon, $mday, $hour, $min, $sec, $analysisTypeLabel ) );
+    $eDirName = $eDir;
+}
+
+sub getAvaProjNameFromEDirName {
+    my $pName = $eDirName;
+    if ( $pName =~ /^E_/ ) {
+        $pName =~ s/^E/AVA_Project/;
+        $projName = $pName;
+    } else {
+        push( @problems,
+"Extra processing directory name '$pName' is missing or improperly formatted."
+        );
+    }
+}
+
+sub checkCpu {
+    if (!defined($cpu)) {
+        # if no value supplied, default to just 1 processor for safety
+        $cpu = $defaultCPUValue;
+    } elsif ( $cpu =~ /^\d+$/ ) {
+        # convert any integer looking strings into an actual integer:
+        $cpu = $cpu + 0;
+    } else {
+        push( @problems,
+"The cpu option must be a non-negative integer. The option defaults to $defaultCPUValue if it is not provided.  The special value 0 indicates that all cpus on the machine should be used."
+        );
+    }
+}
+
+sub checkGroupBy {
+    if ($groupBy) {
+        my $kw = $groupBy;
+        $kw =~ s/^\s+//;
+        $kw =~ s/\s+$//;
+        $kw = uc($kw);
+        if ( $kw eq 'SAMPLE' ) {
+            $groupBySample   = 1;
+            $groupByReadData = 0;
+        } elsif ( $kw eq 'READDATA' ) {
+            $groupBySample   = 0;
+            $groupByReadData = 1;
+        } else {
+            push( @problems,
+"Value '$kw' is not a valid choice for the --groupBy (--gb) parameter ('sample' and 'readData' are allowed values)."
+            );
+        }
+    } else {
+        $groupBySample   = 0;
+        $groupByReadData = 1;
+    }
+}
+
+sub checkSplitBy {
+    if ($splitBy) {
+        my $kw = $splitBy;
+        $kw =~ s/^\s+//;
+        $kw =~ s/\s+$//;
+        $kw = uc($kw);
+        if ( $kw eq 'STRAND' ) {
+            $splitByStrand = 1;
+            $splitByAmp    = 0;
+        } elsif ( $kw eq 'AMP' ) {
+            $splitByStrand = 0;
+            $splitByAmp    = 1;
+        } elsif ( $kw eq 'NONE' ) {
+            $splitByStrand = 0;
+            $splitByAmp    = 0;
+        } else {
+            push( @problems,
+"Value '$kw' is not a valid choice for the --splitBy (--sb) parameter ('strand', 'amp', and 'none' are allowed values)."
+            );
+        }
+    } else {
+        $splitByStrand = 0;
+        $splitByAmp    = 0;
+    }
+}
+
+sub checkIncludeKey {
+    if ($includeKey) {
+        $includeKey = 1;
+    } else {
+        $includeKey = 0;
+    }
+}
+
+sub checkResearcherRun {
+
+    # Register if the researcherRun option has been provided
+    # and set it to the appropriate binary value of 0 or 1.
+    if ($isResearcherRun) {
+        $isResearcherRun = 1;
+
+        # The researcher run must account for the possibility
+        # of using MID11 as a real sample instead of as a negative control.
+    } else {
+        $isResearcherRun = 0;
+    }
+}
+
+sub checkVerbose {
+
+    # Register if the verbose option has been provided
+    # and set it to the appropriate binary value of 0 or 1.
+    if ($verbose) {
+        $verbose = 1;
+    } else {
+        $verbose = 0;
+    }
+}
+
+sub checkVersion {
+
+    # Register if the version option has been provided
+    # and set it to the appropriate binary value of 0 or 1.
+    if ($showVersion) {
+        $showVersion = 1;
+        if ( $hasOpt == 1 ) {
+            &displayVersionAndExit();
+        } else {
+            push( @problems,
+"The option --version should not be combined with other options."
+            );
+        }
+    } else {
+        $showVersion = 0;
+    }
+}
+
+sub getVersionString {
+    my $versionString = $softwareName . " " . $version . " (" . $tagInfo . ")";
+    return ($versionString);
+}
+
+sub displayVersionAndExit {
+    print &getVersionString(), "\n";
+    exit(0);
+}
+
+sub checkFromPipeline {
+
+    # Register if the fromPipeline option has been provided
+    # and set it to the appropriate binary value of 0 or 1.
+    if ( $fromPipeline || length($fromPipeline) > 1 ) {
+        $fromPipeline = uc($fromPipeline);
+        if (   $fromPipeline eq 'Y'
+            || $fromPipeline eq 'YES'
+            || $fromPipeline eq 'T'
+            || $fromPipeline eq 'TRUE' )
+        {
+            $fromPipeline = 1;
+        } elsif ( $fromPipeline eq 'N'
+            || $fromPipeline eq 'NO'
+            || $fromPipeline eq 'F'
+            || $fromPipeline eq 'FALSE' )
+        {
+            $fromPipeline = 0;
+        } else {
+            push( @problems,
+"Improper value provided for --fromPipeline option (use yes or no or true or false)."
+            );
+        }
+    } else {
+        $fromPipeline = 0;
+    }
+}
+
+sub checkLinkSff {
+
+    # Register if the linkSff option has been provided
+    # and set it to the appropriate binary value of 0 or 1.
+    if ( $linkSff || length($linkSff) > 1 ) {
+        $linkSff = uc($linkSff);
+        if (   $linkSff eq 'Y'
+            || $linkSff eq 'YES'
+            || $linkSff eq 'T'
+            || $linkSff eq 'TRUE' )
+        {
+            $linkSff = 1;
+        } elsif ( $linkSff eq 'N'
+            || $linkSff eq 'NO'
+            || $linkSff eq 'F'
+            || $linkSff eq 'FALSE' )
+        {
+            $linkSff = 0;
+        } else {
+            push( @problems,
+"Improper value provided for --linkSff option (use yes or no or true or false)."
+            );
+        }
+    } else {
+        if ($fromPipeline) {
+            $linkSff = 1;
+        } else {
+            $linkSff = 0;
+        }
+    }
+}
+
+sub checkDoCleanup {
+    if ( $doCleanup || length($doCleanup) > 1 ) {
+        $doCleanup = uc($doCleanup);
+        if (   $doCleanup eq 'Y'
+            || $doCleanup eq 'YES'
+            || $doCleanup eq 'T'
+            || $doCleanup eq 'TRUE' )
+        {
+            $doCleanup = 1;
+        } elsif ( $doCleanup eq 'N'
+            || $doCleanup eq 'NO'
+            || $doCleanup eq 'F'
+            || $doCleanup eq 'FALSE' )
+        {
+            $doCleanup = 0;
+        } else {
+            push( @problems,
+"Improper value provided for --doCleanup option (use yes or no or true or false)."
+            );
+        }
+    } else {
+	# Default to turning off --doCleanup if it hasn't been provided. 
+	$doCleanup = 0;
+    }
+}
+
+# (FLX,MR=8 FLX,HR=4 Jr,MR=1 Jr,HR=1)
+
+sub checkDoAmpLocation {
+
+    # The script needs the appropriate version of the
+    # doAmplicon program (the Command Line Interface (CLI))
+    # to do its work. The path to the doAmplicon program may
+    # either be explicitly provided via the --doAmpliconPath
+    # parameter or the user may instead specify the install
+    # path for their 454 software (such as /opt/454/). If the
+    # user doesn't specify either parameter (--dap or --sip),
+    # this script attempts to find a copy of doAmplicon on
+    # its own. The programs are tested to make sure that they
+    # are the appropriate version (see the $expectedVer
+    # global variable at the top of the script).
+
+    if ( $doAmpPath && $softwareInstallPath ) {
+        push( @problems,
+"Only one parameter may be used at a time to specify the location of the doAmplicon program. Use either the --doAmpliconPath (-dap) or the --softwareInstallPath (--sip) but not both."
+        );
+    } else {
+        &checkSoftwareInstallPath();
+        &validateDoAmpPath();
+    }
+}
+
+sub checkSoftwareInstallPath {
+
+    # The software install path should be the the path where
+    # the user's 454 software is installed (such as /opt/454/).
+    # It is expected that the installation has a 'bin' directory
+    # with both doAmplicon and gsAmplicon programs installed.
+    if ($softwareInstallPath) {
+        if ( !-d $softwareInstallPath ) {
+            push( @problems,
+"The provided --softwareInstallPath (--sip $softwareInstallPath) is not a valid directory."
+            );
+        } else {
+            $softwareInstallPath = &slashTerminateDir($softwareInstallPath);
+            $doAmpPath = $softwareInstallPath . 'apps/amplicons/bin/doAmplicon';
+        }
+    }
+}
+
+sub slashTerminateDir {
+
+    # When users provide a directory as the value of a command
+    # line parameter, they may or may not end the directory with
+    # a slash. This subroutine, forces the directory to end in a
+    # single slash so the directory can be used to build deeper
+    # paths in a predictable manner.
+    my ($dir) = @_;
+    $dir .= '/';
+    $dir =~ s/\/+$/\//;
+    return ($dir);
+}
+
+sub validateDoAmpPath {
+
+    # Make sure that a doAmplicon program of the proper
+    # version can be found.
+
+    if ($doAmpPath) {
+
+        # If a doAmpPath has been provided, make sure that it
+        # exists and then verify it is the proper version. If
+        # not, try and search for an alternative and make a
+        #recommendation to the user.
+        if ( -e $doAmpPath ) {
+            my $oldDoAmpPath = $doAmpPath;
+            ( $doAmpPath, $doAmpVer ) = &verifyDoAmp($doAmpPath);
+            if ( !$doAmpPath ) {
+                $doAmpPath = &findDoAmp();
+                if ($doAmpPath) {
+                    push( @problems,
+"Provided --doAmpliconPath (--dap) is not the expected version of the software (expected: $expectedVer or higher). An alternative has been found automatically ($doAmpPath). If the alternative is acceptable, rerun without using the (--dap) parameter (forcing the automatic alternative to be used), or use the the parameter to explicitly provide '$doAmpPath' or to provide another valid alternative."
+                    );
+                } else {
+                    $doAmpPath = $oldDoAmpPath;
+                    push( @problems,
+"The --doAmpliconPath (--dap $doAmpPath) you provided is not the expected version ($expectedVer) and an alternative can not be found automatically. It is strongly recommended that you get the proper version ($expectedVer or higher) of the off instrument applications installed on your machine. When you have the proper software installed, you should  reprocess this data and supply a valid path to the program using the doAmpliconPath parameter (--dap) along with the --overwriteEnabled flag (--oe)."
+                    );
+                }
+            }
+        } else {
+            push( @problems,
+"The --doAmpliconPath (--dap) you provided '$doAmpPath' does not exist. Check the path for typographic errors and try again. If you run the script without the (--dap) and (--sip) parameters, the script will search for a version on its own. If it can't find one automatically and you can't point to a specific path, you will need to get version $expectedVer or higher of the 454 off instrument app software installed on your machine before proceeding."
+            );
+        }
+    } else {
+
+        # If no doAmpPath has been provided by the user,
+        # try and find a copy of the program that is the right
+        # version. If the search fails, warn the user.
+        $doAmpPath = &findDoAmp();
+        if ( !$doAmpPath ) {
+            push( @problems,
+"Unable to automatically find a valid instance of the doAmplicon program of the proper version ($expectedVer) or higher. Supply the path to the program using the --doAmpliconPath parameter (--dap)."
+            );
+        } else {
+            ( $doAmpPath, $doAmpVer ) = &verifyDoAmp($doAmpPath);
+        }
+    }
+}
+
+sub validateProjectDirectory {
+
+    # Make sure that the supplied AVA project directory exists
+    # as a directory and that it contains a project setup file.
+    if ( -d $projectDir ) {
+        my $projFile =
+          $projectDir . '/Amplicons/ProjectDef/ampliconsProject.txt';
+        if ( !-e $projFile || !-s $projFile ) {
+            push( @problems,
+"The provided --projectDir (--pd $projectDir) is a directory, but does not appear to be setup properly. Rerun the setup using a different project directory or with the same directory but using the --overwriteEnabled (--oe) flag."
+            );
+        }
+    } else {
+        push( @problems,
+"Starting the action pipeline with the --compute flag requires an existing AVA project as input. The provided --projectDir (--pd $projectDir) does not already exist as a directory."
+        );
+    }
+}
+
+sub findDoAmp {
+
+    # Find valid version of doAmplicon on the users system and make a choice.
+
+    my $finalPath = "";
+
+    # First try to find doAmplicon in the installation that this script
+    # should be a part of.
+    $finalPath = &findRelativeDoAmpPath();
+
+    if ( !$finalPath ) {
+        my $fail = 0;
+
+        # Use 'which' to search the users system for doAmplicon.
+        open( WH, "which doAmplicon 2>&1 |" ) or $fail = 1;
+        if ( !$fail ) {
+            while ( defined( my $line = <WH> ) ) {
+                chomp($line);
+                if ( $line =~ /doAmplicon$/ ) {
+                    my ($path) = ( $line =~ /\s*(\S*doAmplicon)$/ );
+                    my $pVer = 0;
+                    ( $path, $pVer ) = &verifyDoAmp($path);
+                    if ($path) {
+                        $finalPath = $path;
+                        last;
+                    }
+                }
+            }
+            close(WH);
+        }
+
+        if ( !$finalPath ) {
+
+            # Do another search using a set of preferred expected paths.
+            my %seenDoAmps      = ();
+            my @binaries        = ();
+            my %doAmpsByVer     = ();
+            my $doAmpFoundCount = 0;
+
+            foreach my $dir (@preferredBinDirs) {
+                my $path = $dir . 'doAmplicon';
+
+                # Because some of the paths use wildcards, more than
+                # one path may be returned by the list command.
+
+                open( LS, "ls -1 $path 2>&1 |" ) or $fail = 1;
+                if ( !$fail ) {
+                    while ( defined( my $line = <LS> ) ) {
+                        chomp($line);
+                        if (   $line !~ /^ls:/
+                            && $line !~ /: No such file or directory/ )
+                        {
+                            push( @binaries, $line )
+                              if ( !exists( $seenDoAmps{$line} ) );
+                            $seenDoAmps{$line} = 1;
+                        }
+                    }
+                    close(LS);
+                }
+            }
+
+            foreach my $binary (@binaries) {
+
+                # Verify the version of doAmplicon for each instance found.
+                my $bVer = 0;
+                ( $binary, $bVer ) = &verifyDoAmp($binary);
+                if ($binary) {
+                    push( @{ $doAmpsByVer{$bVer} }, $binary );
+                    $doAmpFoundCount++;
+                }
+            }
+
+            if ($doAmpFoundCount) {
+                my @vers     = ( sort byVer ( keys %doAmpsByVer ) );
+                my $verCount = scalar(@vers);
+                my $highVer  = $vers[ $verCount - 1 ];
+                $finalPath = $doAmpsByVer{$highVer}->[0];
+                if ( $doAmpFoundCount > 1 ) {
+                    push(
+                        @notes,
+                        join( "\n",
+"An automatic scan returned $doAmpFoundCount instances of doAmplicon.",
+"The instance with the highest version, above $expectedVer, was chosen as",
+"indicated below.  You can specify a specific instance to use with the",
+"-doAmpliconPath (--dap) option.  The choices found were:" )
+                    );
+                    foreach my $ver (@vers) {
+                        foreach my $doAmp ( @{ $doAmpsByVer{$ver} } ) {
+                            push( @notes, "$ver $doAmp" );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    # $finalPath will be an empty string if no valid version was found.
+    return ($finalPath);
+}
+
+sub findRelativeDoAmpPath {
+
+    # Use the location of this script as a means to infer the location
+    # of the doAmplicon that is part of the same installation.
+    my $finalPath = "";
+
+    # There is a possibility that doAmplicon might sit in the same
+    # directory as the script, if the script is in the ROOT/bin/
+    # directory as a symbolic link. Test that case first by replacing
+    # the name of this script in its path name with doAmplicon and
+    # attempting to verify that version of doAmplicon.
+    my $scriptDir = $0;
+    $scriptDir =~ s/${moduleName}$//;
+    my $scriptPath = $scriptDir . 'doAmplicon';
+    my $scriptVer  = 0;
+    ( $scriptPath, $scriptVer ) = &verifyDoAmp($scriptPath);
+    if ( !$scriptPath ) {
+
+        # If the first attempt fails, the assumption is that this
+        # script is residing at ROOT/apps/addons/GTypeHLA/bin/.
+        my $absScriptPath = abs_path($0);
+        my $absScriptVer  = 0;
+        if ( $absScriptPath =~ /\/apps\/addons\/GTypeHLA\/bin\/${moduleName}$/ )
+        {
+            $absScriptPath =~
+s/\/addons\/GTypeHLA\/bin\/${moduleName}$/\/amplicons\/bin\/doAmplicon/;
+            ( $absScriptPath, $absScriptVer ) = &verifyDoAmp($absScriptPath);
+            if ($absScriptPath) {
+                $finalPath = $absScriptPath;
+            }
+        }
+    } else {
+        $finalPath = $scriptPath;
+    }
+    return ($finalPath);
+}
+
+sub verifyDoAmp {
+
+    # Verify that a path to doAmplicon specifies
+    # the expected version of the program.
+    my ($inPath) = @_;
+    my $outPath  = "";
+    my $outVer   = "0";
+    if ( -e $inPath ) {
+        my $fail = 0;
+
+        # The "about" parameter (-a) of doAmplicon
+        # provides text that includes the version number.
+        open( AB, "$inPath -a 2>&1 |" ) or $fail = 1;
+        if ( !$fail ) {
+            while ( defined( my $line = <AB> ) ) {
+                chomp($line);
+                if ( $line =~ /^GS Amplicon Variant Analyzer/ ) {
+                    my $ver = "";
+                    if ( $line =~ /Version/ ) {
+                        ($ver) = ( $line =~ /,\s*Version\s*(\S+)/ );
+                    } elsif ( $line =~ /GS Amplicon Variant Analyzer,/ ) {
+                        ($ver) = ( $line =~ /,\s*(\S+)/ );
+                    }
+                    if ( $ver ge $expectedVer ) {
+                        $outPath = $inPath;
+                        $outVer  = $ver;
+                    }
+                    last;
+                }
+            }
+            close(AB);
+        }
+    }
+
+    # $outPath will be an empty string if the input
+    # path is invalid or of the incorrect version.
+    return ( $outPath, $outVer );
+}
+
+sub byVer {
+    my $aString = $a;
+    my $bString = $b;
+    if ( $aString =~ /\d+p\d+/ ) {
+        $aString =~ s/p/\.p/;
+    }
+    if ( $bString =~ /\d+p\d+/ ) {
+        $bString =~ s/p/\.p/;
+    }
+    my @aFields = split( /\./, $aString );
+    my @bFields = split( /\./, $bString );
+    my $aFieldCount = scalar(@aFields);
+    my $bFieldCount = scalar(@bFields);
+    my $minFieldCount =
+      ( $aFieldCount < $bFieldCount ? $aFieldCount : $bFieldCount );
+    my $lastFieldIndex = $minFieldCount - 1;
+    for ( my $i = 0 ; $i < $minFieldCount ; $i++ ) {
+        my $aVal = $aFields[$i];
+        my $bVal = $bFields[$i];
+        if ( $aVal =~ /^\d+$/ && $bVal =~ /^\d+$/ ) {
+            if ( $aVal != $bVal ) {
+                return ( $aVal <=> $bVal );
+            } elsif ( $i == $lastFieldIndex ) {
+                if ( $aFieldCount != $bFieldCount ) {
+                    return ( $aFieldCount <=> $bFieldCount );
+                } else {
+                    return ( $aVal <=> $bVal );
+                }
+            } else {
+                next;
+            }
+        } elsif ( $aVal =~ /^p\d+/ && $bVal =~ /^p\d+/ ) {
+            my ($aPatch) = ( $aVal =~ /p(\d+)/ );
+            my ($bPatch) = ( $bVal =~ /p(\d+)/ );
+            if ( $aPatch != $bPatch ) {
+                return ( $aPatch <=> $bPatch );
+            } elsif ( $i == $lastFieldIndex ) {
+                if ( $aFieldCount != $bFieldCount ) {
+                    return ( $aFieldCount <=> $bFieldCount );
+                } else {
+                    return ( $aVal cmp $bVal );
+                }
+            } else {
+                next;
+            }
+        } elsif ( $aVal =~ /^p\d+/ && $bVal =~ /^\d+$/ ) {
+            return ( 0 <=> 1 );
+        } elsif ( $aVal =~ /^\d+$/ && $bVal =~ /^p\d+/ ) {
+            return ( 1 <=> 0 );
+        } elsif ( $aVal ne $bVal ) {
+            return ( $aVal cmp $bVal );
+        } elsif ( $i == $lastFieldIndex ) {
+            if ( $aFieldCount != $bFieldCount ) {
+                return ( $aFieldCount <=> $bFieldCount );
+            } else {
+                return ( $aVal cmp $bVal );
+            }
+        } else {
+            next;
+        }
+    }
+}
+
+sub checkAllowReadDataSupersets {
+
+    # Register if the allowMixedSFF option has been provided
+    # and set it to the appropriate binary value of 0 or 1.
+    if ($allowMixedSFF) {
+        $allowMixedSFF = 1;
+    } else {
+        $allowMixedSFF = 0;
+    }
+}
+
+sub checkOverwriteFlag {
+
+    # Register if the overwriteEnabled option has been provided
+    # and set it to the appropriate binary value of 0 or 1.
+    if ($overwriteEnabled) {
+        $overwriteEnabled = 1;
+    } else {
+        $overwriteEnabled = 0;
+    }
+}
+
+sub checkHelpFlag {
+
+    # Register if the help option has been provided
+    # and set it to the appropriate binary value of 0 or 1.
+    if ($showHelp) {
+        $showHelp = 1;
+        if ( $hasOpt == 1 ) {
+            &basicHelp();
+            exit(0);
+        } else {
+            push( @problems,
+                "The option --help should not be combined with other options."
+            );
+        }
+    } else {
+        $showHelp = 0;
+    }
+}
+
+sub checkAdvancedHelpFlag {
+
+    # Register if the advancedHelp option has been provided
+    # and set it to the appropriate binary value of 0 or 1.
+    if ($showAdvancedHelp) {
+        $showAdvancedHelp = 1;
+        if ( $hasOpt == 1 ) {
+            &advancedHelp();
+            exit(0);
+        } else {
+            push( @problems,
+"The option --advancedHelp should not be combined with other options."
+            );
+        }
+    } else {
+        $showAdvancedHelp = 0;
+    }
+}
+
+sub validateActions {
+    &validateSetupAction();
+    &validateComputeAction();
+    &validateReportAction();
+}
+
+sub checkActions {
+
+    # Handle the user input regarding the action flags.
+
+    # Setup binary integer values for the action flag parameters.
+    $setup   = ( $setup   ? 1 : 0 );
+    $compute = ( $compute ? 1 : 0 );
+    $report  = ( $report  ? 1 : 0 );
+
+    # Check the logic of the user provided action flag combination. The setup-
+    # report pair is invalid (compute must be included in that situation
+    # because a newly setup project needs to be computed before it
+    # can be reported).
+    if ( !$setup && !$compute && !$report ) {
+
+        # No action flags have been provided. Assume that the user wants to
+        # run the script with a more compact command line and expects all
+        # actions to be performed.
+        $setup   = 1;
+        $compute = 1;
+        $report  = 1;
+    } elsif ( $setup && $report && !$compute ) {
+        push( @problems,
+"The setup flag indicates that a new project is being started. The report flag requires a computed project as input. Either include the compute flag or choose just the setup or the report flag."
+        );
+    }
+}
+
+sub validateSetupAction {
+
+    # Make sure it is safe to run project setup given the supplied parameters.
+    if ($setup) {
+        if ( -e $projectDir ) {
+
+            # Setup will not overwrite an existing AVA project unless
+            # the user explicitly provides the overwriteEnabled flag.
+            if ( !$overwriteEnabled ) {
+                push( @problems,
+"The --setup flag has been used and the --projectDir (-pd $projectDir) already exists. Choose another project name or use the --overwriteEnabled flag (--oe)."
+                );
+            }
+        }
+    }
+}
+
+sub validateComputeAction {
+
+    # Make sure it is safe to run computation given the supplied parameters.
+    if ($compute) {
+        if ( !$setup ) {
+
+            # If the setup action has not been provided, computation
+            # expects that a valid AVA project already exists.
+            &validateProjectDirectory();
+        }
+    }
+}
+
+sub validateReportAction {
+
+    # Make sure it is safe to run reporting given the supplied parameters.
+    if ($report) {
+        if ($reportVariants) {
+            if ( $reportFile && -e $reportFile ) {
+
+                # Check to see if a report already exists and
+                # if there is permission to overwrite it.
+                if ( !$overwriteEnabled ) {
+                    push( @problems,
+"A report file ($reportFile) for this --projectDir (--pd $projectDir) already exists. Use the --overwriteEnabled flag (--oe) to  force a regeneration of the report."
+                    );
+                }
+            }
+        }
+        if ( -e $outputDirFasta ) {
+            my @oFiles = `ls -1 $outputDirFasta`;
+            foreach my $oFile (@oFiles) {
+                chomp($oFile);
+                if ( $oFile =~ /\.fna$/ ) {
+                    if ( !$overwriteEnabled ) {
+                        push( @problems,
+"A fasta file ($oFile) already exists in the output reporting directory ($outputDirFasta). Use the --overwriteEnabled flag to force a regeneration of the output."
+                        );
+                    }
+                    last;
+                }
+            }
+        }
+        if ( !$setup ) {
+
+            # If the setup action has not been provided, computation
+            # expects that a valid AVA project already exists.
+            if ( -d $projectDir ) {
+                &validateProjectDirectory();
+            }
+
+            # If the compute action has not been provided, check to
+            # see that there is evidence that the project has already
+            # been computed before allowing reporting.
+            if ( !$compute ) {
+                &validateComputation();
+            }
+        }
+    }
+}
+
+sub validateComputation {
+
+    # Dig into the internal files of the project to make sure
+    # that the last computation of the project was successful.
+    my $compFile =
+      $projectDir . '/Amplicons/Compute/finalComputationStatus.txt';
+    if ( !-e $compFile ) {
+        push( @problems,
+"The computation status file ($compFile) for the project does not exist. Try including the compute flag to force a project computation."
+        );
+    } else {
+        my $compDone     = 1;
+        my @compLogLines = ();
+        open( CF, "<$compFile" )
+          or &logDie("Unable to read computation status file ($compFile).");
+        while ( defined( my $line = <CF> ) ) {
+            chomp($line);
+            push( @compLogLines, $line );
+            if ( $line =~ /^RootStatus/ ) {
+                if ( $line !~ /Done\s*-\s*OK/ ) {
+                    $compDone = 0;
+                }
+            } elsif ( $line =~ /^NotOK/ ) {
+                my ($notOkNum) = ( $line =~ /^NotOK\s+(\d+)/ );
+                if ($notOkNum) {
+                    $compDone = 0;
+                }
+            }
+        }
+        close(CF);
+        if ( !$compDone ) {
+            my $msg = "The last computation did not complete successfully."
+              . (
+                !$compute
+                ? " Try including the compute flag to force a project recomputation. "
+                : " "
+              ) . "The log below may provide useful in troubleshooting.";
+            push( @problems, ( $msg, @compLogLines ) );
+        }
+    }
+}
+
+sub checkDataLocation {
+
+    # Process the user parameters related to data location.
+
+    # Register the location parameter values and make a note
+    # in @problems if the data can't be found
+    &registerDataLocation();
+    if ($setup) {
+
+        # It is only important to further vet the location parameters
+        # for the setup phase; computation and/or reporting in the
+        # absence of a setup flag uses a pre-existing project.
+
+        # Any error messages in @problems related to the lack of
+        # dataDir or sffDir has already been taken care of by
+        # &registerDataLocation, so just return if neither is set
+        return if ( !$dataDir && !$sffDir );
+
+        # Use the input parameters to construct a path to
+        # the directory containing the Read Data.
+        my $readDataPath = &resolveDataLocation();
+
+        if ($readDataPath) {
+            my %sRegions = ();
+
+            # Register the Read Data by prefix and region.
+            &registerReadData( $readDataPath, \%sRegions );
+
+            my @sPrefixes = ( sort( keys %sRegions ) );
+            my $sPreCount = scalar(@sPrefixes);
+
+            if ( !$sPreCount ) {
+
+                # Make sure the directory contains SFF files.
+                push( @problems,
+"The specified area for the readData ($readDataPath) does not contain any SFF files."
+                );
+            } elsif ( $sPreCount > 1 ) {
+
+                # The SFF files do not all come from a single run
+                # (via a shared SFF file prefix).
+                if ( !$allowMixedSFF ) {
+
+                    # In a regular run all read data should share a prefix.
+                    push( @problems,
+"ReadData from more than one run are in the same directory. This script only handles setting up a project with input from a single run."
+                    );
+                } else {
+
+                    # If the read data from multiple runs are artificially
+                    # collected into a directory they can be processed within
+                    # the same AVA project if the $allowMixedSFF
+                    # flag is set.
+                    foreach my $sPre (@sPrefixes) {
+                        my @regions =
+                          ( sort { $a <=> $b } ( keys %{ $sRegions{$sPre} } ) );
+                        foreach my $region (@regions) {
+                            my $rdFile = $sPre . $region;
+                            push( @rdFiles, $rdFile );
+                        }
+                    }
+                    $rdPath = $readDataPath;
+                }
+            } else {
+
+                # The SFF files are from the same run. Make sure
+                # the expected number of regions is represented.
+                my $sPrefix = $sPrefixes[0];
+                my @regions =
+                  ( sort { $a <=> $b } ( keys %{ $sRegions{$sPrefix} } ) );
+                my $regCount = scalar(@regions);
+
+                # Make sure the spefic regions expected are represented.
+                &getFinalRdSet( $sPrefix, \@regions );
+                $rdPath = $readDataPath;
+            }
+        } else {
+            push( @problems,
+"Unable to resolve the read data location from the input parameters\n(--dd, or --sd) or the current working directory."
+            );
+        }
+    }
+}
+
+sub registerDataLocation {
+
+    # Register the user settings for the data location.
+    &checkDataDir();
+    &checkSffDir();
+
+    # Make sure only one type of location has been provided.
+    if ( $dataDir && $sffDir ) {
+        push( @problems,
+"Only one method of providing the location of the readData (SFF files) can be used at a time. Use the --dataDir (--dd) or --sffDir (--sd) parameters to indicate where the read data for the project can be obtained."
+        );
+    } elsif ( !$dataDir && !$sffDir ) {
+        push( @problems, &getNeedToSupplyReadDataMessage() );
+    }
+}
+
+sub getNeedToSupplyReadDataMessage {
+    return join( "\n",
+"You must specify the input SFF files using either the --dataDir (--dd) or",
+        "--sffDir (--sd) options on the command line." );
+
+}
+
+sub checkDataDir {
+
+    # Check that the provided data dir exists.
+    if ($dataDir) {
+        $dataDir = &slashTerminateDir($dataDir);
+        if ( !-d $dataDir ) {
+            push( @problems,
+                "--dataDir (--dd) provided ($dataDir) is not a directory." );
+        }
+    }
+}
+
+sub checkSffDir {
+
+    # Check that the provided SFF dir exists.
+    if ($sffDir) {
+        $sffDir = &slashTerminateDir($sffDir);
+        if ( !-d $sffDir ) {
+            push( @problems,
+                "--sff (--sd) provided ($sffDir) is not a directory." );
+        }
+    }
+}
+
+sub resolveDataLocation {
+
+    # Used the location provided by the user to construct
+    # a path to the directory containing the SFF files.
+    my $readDataPath = "";
+    if ($dataDir) {
+        $readDataPath = &getSffDirFromDataDir($dataDir);
+    } elsif ($sffDir) {
+        if ( -d $sffDir ) {
+            $readDataPath = $sffDir;
+        }
+    }
+    return ($readDataPath);
+}
+
+sub getSffDirFromDataDir {
+
+    # Use the structure of the data directory
+    # to construct a path to the SFF files.
+    my ($dataDir)    = @_;
+    my $readDataPath = "";
+    my $sPath        = $dataDir . 'sff/';
+    if ( !-d $sPath ) {
+        push( @problems,
+"The SFF subdirectory is missing from the --dataDir (--dd $dataDir).  Specify an alternate data directory, or use the --sd parameter to specify the directory containing the SFF Files."
+        );
+    } else {
+        $readDataPath = $sPath;
+    }
+    return ($readDataPath);
+}
+
+sub registerReadData {
+
+    # Given a path containing Read Data, catalog the
+    # SFF files by their prefix and region.
+    my ( $readDataPath, $sRegionsRef ) = @_;
+    my @sffFiles = `ls -1 $readDataPath`;
+
+    foreach my $sFile (@sffFiles) {
+        chomp($sFile);
+        if ( $sFile =~ /\.sff$/ ) {
+            $sFile =~ s/\.sff$//;
+            if ( my ( $sPre, $reg ) = ( $sFile =~ /^(.+)(\d\d)$/ ) ) {
+
+                # Only consider SFF files that are in the correct format
+                # (i.e., end with two digits representing the region)
+                $sRegionsRef->{$sPre}{$reg} = 1;
+            }
+        }
+    }
+}
+
+sub getFinalRdSet {
+
+    # Make sure that the regions of the specified read data match
+    # the specific expected set of regions for the run.
+    my ( $sPrefix, $regionsRef ) = @_;
+    my $rCounter = 0;
+    foreach my $region ( @{$regionsRef} ) {
+        $rCounter++;
+        my $rcLen   = length($rCounter);
+        my $compReg = $rCounter;
+        if ( $rcLen == 1 ) {
+            $compReg = '0' . $compReg;
+        }
+        if ( $compReg eq $region || $allowMixedSFF ) {
+            my $rdFile = $sPrefix . $region;
+            push( @rdFiles, $rdFile );
+        } else {
+            push( @problems,
+                "Unexpected region comparison '$region' vs '$compReg'." );
+        }
+    }
+
+}
+
+sub checkGsAmp {
+
+    # Make sure that there is a corresponding gsAmplicon for
+    # the doAmplicon so the user can view the data via the GUI,
+    $gsAmpPath = $doAmpPath;
+    $gsAmpPath =~ s/doAmplicon$/gsAmplicon/;
+    if ( !-e $gsAmpPath ) {
+        push( @problems,
+"Unable to find a gsAmplicon binary in the same directory as the doAmplicon binary ($doAmpPath)"
+        );
+    }
+}
+
+sub checkLog {
+
+    # Attempt to open up a log file and set the $logFH if successful.
+    if ($logFile) {
+
+        # The logFile gets written within the $outputDir. In some instances
+        # this involves an E-dir subdirectory that hasn't been created yet.
+        # Since writing the log isn't an optional exercise, and because the
+        # log check only occurs when the rest of the command line has
+        # survived its vetting, this seems like the place to instantiate
+        # the full $outputDir if necessary.
+        if ( $outputDirParent && !-e $outputDirParent ) {
+            &executeLinuxCmdAndTrapErrors("mkdir $outputDirParent");
+        }
+        if ( !-e $outputDir ) {
+            &executeLinuxCmdAndTrapErrors("mkdir $outputDir");
+        }
+        if ( !-e $outputDirFasta ) {
+            &executeLinuxCmdAndTrapErrors("mkdir $outputDirFasta");
+        }
+        my $fail = 0;
+	my $versionLine = "Version: " . &getVersionString() . "\n";
+	my $command     = "Command: $commandLine\n";
+	my $inputLine   = "Input data: $rdPath\n";
+	my $outLine     = "Output: $outputDir\n";
+        open( LF, ">$logFile" ) or $fail = 1;
+	if (!$fail) {
+	    $logFH = \*LF;
+            autoflush $logFH 1;
+	}
+	&logLine($versionLine);
+	&logLine($command);
+	&logLine($inputLine);
+	&logLine($outLine);
+	&logLine("\n$ruoMsg\n");
+        if ($fail) {
+            &logLine("Unable to write to log file '$logFile'.");
+        } 	
+    }
+}
+
+sub getLogMsgPrefix {
+    my ($status) = @_;
+    my ( $sec, $min, $hour, $mday, $mon, $year, $wday, $yday, $isdst ) =
+      localtime(time);
+    $year += 1900;
+    $mon  = &leadingZeroPad( $mon,  2 );
+    $mday = &leadingZeroPad( $mday, 2 );
+    $hour = &leadingZeroPad( $hour, 2 );
+    $min  = &leadingZeroPad( $min,  2 );
+    $sec  = &leadingZeroPad( $sec,  2 );
+    my $day = ( 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat' )[$wday];
+    my $month = (
+        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    )[$mon];
+
+    #[Wed Oct 27 19:29:12 2010][Warning][MetricsGenerator]
+    my $prefix =
+      "[$day $month $mday $hour:$min:$sec $year][$status][$moduleName] ";
+}
+
+sub logLine {
+
+    # Log a line to both STDERR and the $logFH if it is being used.
+    my ( $line, $status ) = @_;
+    if ( !$status ) {
+        $status = 'Information';
+    }
+    &checkLogStatus($status);
+    if (
+        $fromPipeline
+        && (   $status eq 'Warning'
+            || $status eq 'Error'
+            || $status eq 'Critical'
+            || $status eq 'Fatal' )
+      )
+    {
+
+        # In fromPipeline mode, negative messages of Warning
+        # class or worse go to STDERR.
+        print STDERR $line;
+    } elsif ( $verbose || ( $status ne 'Debug' && $status ne 'Trace' ) ) {
+
+        # In fromPipeline mode, positive messages of class
+        # Notice or more detailed go to STDOUT. If verbose
+        # mode is not turned on, Debug and Trace class
+        # messages get skipped. In non-pipeline mode, all
+        # messages, positive or negative, not screened out
+        # by verbose mode being off get sent to STDOUT.
+        print STDOUT $line;
+    }
+    if ( $logFH
+        && ( $verbose || ( $status ne 'Debug' && $status ne 'Trace' ) ) )
+    {
+
+        # In the actual log file (as opposed to the STDOUT/STDERR streams),
+        # the messages get tagged in a manner similar to syslog.Debug and
+        # Trace class messages are not printed to the file unless verbose
+        # mode is turned on.
+        my $msgPrefix          = &getLogMsgPrefix($status);
+        my $hasTerminalNewline = ( $line =~ /\n$/ ? 1 : 0 );
+        my $termNewLineCount   = 0;
+        if ($hasTerminalNewline) {
+            my ($termNewLineString) = ( $line =~ /(\n+)$/ );
+            my @newLines = split( "", $termNewLineString );
+            $termNewLineCount = scalar(@newLines);
+        }
+        my @splitLines = split( "\n", $line );
+        for ( my $nl = 1 ; $nl < $termNewLineCount ; $nl++ ) {
+            push( @splitLines, "" );
+        }
+        my $sLineCount   = scalar(@splitLines);
+        my $sLineCounter = 0;
+        foreach my $sLine (@splitLines) {
+            $sLineCounter++;
+            print $logFH "${msgPrefix}${sLine}";
+            if ( $hasTerminalNewline || $sLineCounter < $sLineCount ) {
+                print $logFH "\n";
+            }
+        }
+    }
+}
+
+sub logFileHandle {
+
+    # Given an open file handle, log its lines of
+    # input to both STDERR and the log file.
+    my ( $inFH, $status ) = @_;
+    if ( !$status ) {
+        $status = 'Debug';
+    }
+    while ( defined( my $line = <$inFH> ) ) {
+        &logLine( $line, $status );
+    }
+}
+
+sub logDie {
+
+    # Log messages to both STDERR and the log file
+    # prior to exiting with a non-zero return code.
+    my ( $line, $status ) = @_;
+    if ( !$status ) {
+        $status = 'Error';
+    }
+    &logLine( $line, $status );
+    exit(1);
+}
+
+sub checkLogStatus {
+    my ($status) = @_;
+    if ( !exists( $validLogClasses{$status} ) ) {
+        &logLine( "Unknown log class '$status'\n", 'Warning' );
+    }
+}
+
+sub executeActionIfNeeded {
+
+    # For a given input action, carry ot the action if it has
+    # been supplied as a command line action flag parameter.
+    my ($action) = @_;
+
+    # For the input action, determine the binary
+    # value of its action flag parameter.
+    my $actionVal = (
+        $action eq 'setup' ? $setup
+        : (
+            $action eq 'compute' ? $compute
+            : ( $action eq 'report' ? $report : undef )
+        )
+    );
+    if ($actionVal) {
+
+        # Only continue executing the action if the binary action value is 1.
+        my $projectActionFile = $projectDir . ".${action}Script.cli.txt";
+
+        # Verify that the CLI script for the action already
+        # exists and only continue if the overwriting is enabled.
+        &logDie(
+"The project $action script '$projectActionFile' already exists. Use the --overwriteEnabled flag if you are willing to replace it with a new file.\n\n"
+        ) if ( !$overwriteEnabled && -e $projectActionFile );
+        if ( $action eq 'setup' && -e $projectDir && $overwriteEnabled ) {
+
+            # If setup is being executed and the AVA project
+            # already exists, remove the existing project if
+            # overwriting is enabled.
+            &executeLinuxCmdAndTrapErrors("rm -rf $projectDir");
+        }
+
+        # Write out the CLI script for the action.
+        open( AS, ">$projectActionFile" )
+          or &logDie(
+            "Unable to write to project $action file '$projectActionFile'.\n\n"
+          );
+        my $asFh = \*AS;
+        &logLine("Generating project $action script '$projectActionFile'.\n");
+        if ( $action eq 'setup' ) {
+            &printSetupFile( $asFh, $projName, $rdPath, \@rdFiles );
+        } elsif ( $action eq 'compute' ) {
+            &printCompFile($asFh);
+        } elsif ( $action eq 'report' ) {
+            &printReportFile($asFh);
+        }
+        close(AS);
+
+        # Execute the CLI script using doAmplicon in verbose mode.
+        &logLine("Executing project $action script '$projectActionFile'.\n");
+        &logLine(
+"This may take a while depending on the volume of data. Do not terminate this script. You may follow the computation status in more detail by opening the AVA project ($projectDir) using the AVA GUI ($gsAmpPath). If you steal control of the project using the AVA GUI, be sure not to terminate the computation or alter the project until this script has generated your report.\n"
+        ) if ( $action eq 'compute' );
+
+        &executeLinuxCmdAndTrapErrors(
+            "$doAmpPath --cpu $cpu -v $projectActionFile");
+        my $actionFailed = 0;
+        if ( $action eq 'compute' ) {
+            &validateComputation();
+            if (@problems) {
+                my $errLine = "\n\nExecution Problems:\n\n"
+                  . join( "\n", @problems ) . "\n\n";
+                &logLine($errLine);
+                $actionFailed = 1;
+            }
+        }
+        if ($actionFailed) {
+            &logDie(
+"Terminating because running project $action script '$projectActionFile' failed.\n"
+            );
+        } else {
+            &logLine(
+"Successful completion of project $action script '$projectActionFile'.\n"
+            );
+            unlink($projectActionFile);
+        }
+        if ( $action eq 'report' ) {
+            &genAvaConFasta();
+        }
+    }
+}
+
+sub executeLinuxCmdAndTrapErrors {
+    my ($lCmd) = @_;
+    &logLine( "Executing command '$lCmd'.\n", "Debug" );
+    open( CMD, "$lCmd 2>& 1 |" )
+      or &logDie("Problem executing '$lCmd'.\n\n");
+    &logFileHandle( \*CMD );
+    close(CMD)
+      or &logDie("Problem executing '$lCmd'.\n\n");
+}
+
+sub loadProjData {
+    if ( !$setup ) {
+
+        # If "report" is being used in the absence of "setup", the list of
+        # Read Data needs to be obtained by a method tied to the project
+        # rather than relying on pointers to the files prior to import. The
+        # CLI "list readData" command is used to gather the list of ReadData
+        # in the project.
+        my $rdListScriptFile = $projectDir . ".listRdScript.cli.txt";
+        my $rdListOutputFile = $projectDir . ".listRdOutput.txt";
+        open( RDS, ">$rdListScriptFile" )
+          or &logDie(
+"Unable to write to project read data list script file '$rdListScriptFile'.\n\n"
+          );
+        print RDS <<SETUP_TERMINATOR;
+open $projectDir -control readOnly
+list readData -outputFile $rdListOutputFile
+close
+SETUP_TERMINATOR
+        close(RDS);
+
+        &executeLinuxCmdAndTrapErrors(
+            "$doAmpPath --cpu $cpu -v $rdListScriptFile");
+        my $isFirst   = 1;
+        my $itemCount = 0;
+        my @header    = ();
+        my %listData  = ();
+        open( RDL, "<$rdListOutputFile" )
+          or &logDie(
+            "Unable to open read data list output ('$rdListOutputFile').\n");
+
+        while ( defined( my $line = <RDL> ) ) {
+            chomp($line);
+            my @vals = &quotedTabParse($line);
+            if ($isFirst) {
+                @header = @vals;
+            } else {
+                my $pos = 0;
+                $itemCount++;
+                foreach my $val (@vals) {
+                    my $label = $header[$pos];
+                    $listData{$itemCount}{$label} = $val;
+                    $pos++;
+                }
+            }
+            $isFirst = 0;
+        }
+        close(RDL);
+        unlink($rdListScriptFile);
+        unlink($rdListOutputFile);
+        for ( my $item = 1 ; $item <= $itemCount ; $item++ ) {
+            if ( exists( $listData{$item}{'Active'} )
+                && $listData{$item}{'Active'} eq 'true' )
+            {
+                if ( exists( $listData{$item}{'Name'} ) ) {
+                    push( @rdFiles, $listData{$item}{'Name'} );
+                }
+            }
+        }
+    }
+    &loadAmpData();
+    &loadMidData();
+    &loadRdMuxMidSampAmpAssocData();
+    &loadRenameSampleData();
+}
+
+# NOTE: The subroutines below use here-document syntax to supply content
+# for AVA CLI scripts. Be careful not to introduce any whitespace before
+# or after the terminators.
+
+sub printSetupFile {
+    my ( $fh, $projName, $rdPath, $rdFilesRef ) = @_;
+    &printCreateProjCmd( $fh, $projName );
+    &printCreateRefCmd($fh);
+    &printCreateAmpCmd($fh);
+    if ($reportVariants) {
+        &printCreateVariantCmd($fh);
+    }
+    &printCreateMIDsCmd($fh);
+    &printCreateSamplesCmd($fh);
+    &printCreateMultiplexerCmd($fh);
+    &printImportRdCmd( $fh, $rdPath, $rdFilesRef );
+    &printRdMuxMidSampAmpAssoc($fh);
+    &printRenameSamplesCmd($fh);
+    print $fh "save\n";
+}
+
+sub printCompFile {
+    my ($fh) = @_;
+    print $fh <<SETUP_TERMINATOR;
+
+open $projectDir -control preempt
+computation start
+close
+
+SETUP_TERMINATOR
+}
+
+sub printReportFile {
+    my ($fh) = @_;
+    print $fh "open $projectDir -control readOnly\n";
+    if ($reportVariants) {
+        print $fh "report variantHits -outputFile $reportFile\n";
+    }
+    print $fh "close\n";
+}
+
+sub printCreateProjCmd {
+    my ( $fh, $projName ) = @_;
+    print $fh <<SETUP_TERMINATOR;
+    
+create project $projectDir -name $projName -annotation ""
+SETUP_TERMINATOR
+}
+
+sub printCreateRefCmd {
+    my ($fh) = @_;
+    print $fh <<SETUP_TERMINATOR;
+create reference -file - << HERE_TERMINATOR
+"Name"	"Annotation"	"Sequence"
+"DPB1 exon 2"	""	"GCTGCAGGAGAGTGGCGCCTCCGCTCATGTCCGCCCCCTCCCCGCAGAGAATTACCTTTTCCAGGGACGGCAGGAATGCTACGCGTTTAATGGGACACAGCGCTTCCTGGAGAGATACATCTACAACCGGGAGGAGTTCGTGCGCTTCGACAGCGACGGTGGGGGAGGTTCCGGGCGGTGACGGAGCGTGGGGCGGCCTGATGAGGAGTACTGGAACAGCCAGAAGGACATCCTGGAGGAGGAGCGGGCAGTGCCGGACAGGATGTGCAGACACAACTACGAGCTGGGCGGGCCCATGACCCTGCAGCGCCGAGGTGAGTGAGGGCTTTGGGCCGGATCCG"
+"DQA1 exon 2"	""	"GTTTCTTCCATCATTTTGTGTATTAAGGTTCTTTCTTCCCCTGTTCTCCACCTTCCTGCTTGTCATCTTCACTCATCAGCTGACCACGTCGCCTCTTATGGTGTAAACTTGTACCAGTCTTACGGTCCCTCTGGCCAGTACACCCATGAATTTGATGGAGATGAGCAGTTCTACGTGGACCTGGGGAGGAAGGAGACTGTCTGGTGTTTGCCTGTTCTCAGACAATTTAGATTTGACCCGCAATTTGCACTGACAAACATCGCTGTCCTAAAACATAACTTGAACAGTCTGATTAAACGCTCCAACTCTACCGCTGCTACCAATGGTATGTGTCAACAATTCTGCCCCTCTTTACTGATTTATCCCTTCATACCAATTTTCATTATTTTATTTCCAAGAGGTCCCCAGATCTTGTCATGG"
+"DQB1 exon 2"	""	"AGGATCCCCGCAGAGGATTTCGTGTACCAGTTTAAGGGCCTGTGCTACTTCACCAACGGGACGGAGCGCGTGCGGGGTGTGACCAGACACATCTATAACCGAGAGGAGTACGTGCGCTTCGACAGCGACGTGGGGGTGTACCGGGCAGTGACGCCGCAGGGGCGGCCTGTTGCCGAGTACTGGAACAGCCAGAAGGAAGTCCTGGAGGGGGCCCGGGCGTCGGTGGACAGGGTGTGCAGACACAACTACGAGGTGGCGTACCGCGGGATCCTGCAGCGGAGAGGTGAGCGTCCTGCAGGA"
+"DQB1 exon 3"	""	"TGGAGCCCACAGTGACCATCTCCCCATCCAGGACAGAGGCCCTCAACCACCACAACCTGCTGGTCTGCTCGGTGACAGATTTCTATCCAGCCCAGATCAAAGTCCGGTGGTTTCGGAATGACCAGGAGGAGACAGCTGGCGTTGTGTCCACCCCCCTTATTAGGAATGGTGACTGGACCTTCCAGATCCTGGTGATGCTGGAAATGACTCCCCAGCGTGGAGACGTCTACACCTGCCACGTGGAGCACCCCAGCCTCCAGAGCCCCATCACCGTGGAGTGGCGTAAGGGGATATTGAGTTTCTGTTACTGTGGGCCCCACAAGACAAAGGACAGAGCTCCTTCTGACCCATCCCTTCCCATCTCTTATCCCTGATGTCACT"
+"DRBx exon 2"	""	"CCGGATCCTTCGTGTCCCCACAGCACGTTTCTTGGAGCAGGCTAAGTGTGAGTGTCATATCTTCAATGGGATGAAGCGGGTGCAGTACCTGAACAGATACATCCATAAACGGGAGGAGAACCTGCCCTTCGACAGCGACGTGGAGGAGTTCCAGGCAGTTACGGAACTGGGGCGGCCTGTCGCAGAGAACTGGAACAGCCAGAAGGGAATCCTGGAGGAGAATCGGGACAAGGTGGACACCTACTGCAGATACAGTTACGGGGTTTTTGAGAGCTTCACAGTGCAGCGGAATTCGG"
+"gA exons 2,3,4"	""	"CAGGAGCAGAGGGGTCAGGGCGAAGTCCCAGGGCCCCAGGCGTGGCTCTCAGGGTCTCAGGCCCCGAAGGCGGTGTATGGATTGGGGAGTCCCAGCCTTGGGGATTCCCCAACTCCGCAGTTTCTTTTCTCCCTCTCCCAACCTATGTAGGGTCCTTCTTCCTGGATACTCACGACGCGGACCCAGTTCTCACTCCCATTGGGTGTCGGGTTTCCAGAGAAGCCAATCAGTGTCGTCGCGGTCGCGGTTCTAAAGTCCGCACGCACCCACCGGGACTCAGATTCTCCCCAGACGCCGAGGATGGCCGTCATGGCGCCCCGAACCCTCGTCCTGCTACTCTCGGGGGCCCTGGCCCTGACCCAGACCTGGGCGGGTGAGTGCGGGGTCGGGAGGGAAACGGCCTCTGTGGGGAGAAGCAACGGGCCCGCCTGGCGGGGGCGCAGGACCCGGGAAGCCGCGCCGGGAGGAGGGTCGGGCGGGTCTCAGCCACTCCTCGTCCCCAGGCTCCCACTCCATGAGGTATTTCTTCACATCCGTGTCCCGGCCCGGCCGCGGGGAGCCCCGCTTCATCGCCGTGGGCTACGTGGACGACACGCAGTTCGTGCGGTTCGACAGCGACGCCGCGAGCCAGAGGATGGAGCCGCGGGCGCCGTGGATAGAGCAGGAGGGGCCGGAGTATTGGGACCAGGAGACACGGAATGTGAAGGCCCACTCACAGACTGACCGAGTGGACCTGGGGACCCTGCGCGGCTACTACAACCAGAGCGAGGCCGGTGAGTGACCCCGGCCCGGGGCGCAGGTCACGACCTCTCATCCCCCACGGACGGGCCAGGTCGCCCACAGTCTCCGGGTCCGAGATCCGCCCCGAAGCCGCGGGACCCCGAGACCCTTGCCCCGGGAGAGGCCCAGGCGCCTTTACCCGGTTTCATTTTCAGTTTAGGCCAAAAATCCCCCCAGGTTGGTCGGGGCGGGGCGGGGCTCGGGGGACCGGGCTGACCGCGGGGTCCGGGCCAGGTTCTCACACCATCCAGATGATGTATGGCTGCGACGTGGGGTCGGACGGGCGCTTCCTCCGCGGGTACCAGCAGGACGCCTACGACGGCAAGGATTACATCGCCCTGAACGAGGACCTGCGCTCTTGGACCGCGGCGGACATGGCGGCTCAGATCACCAAGCGCAAGTGGGAGGCGGCCCATGTGGCGGAGCAGTTGAGAGCCTACCTGGAGGGCACGTGCGTGGAGTGGCTCCGCAGATACCTGGAGAACGGGAAGGAGACGCTGCAGCGCACGGGTACCAGGGGCCACGGGGCGCCTCCCTGATCGCCTGTAGATCTCCCGGGCTGGCCTCCCACAAGGAGGGGAGACAATTGGGACCAACACTAGAATATCGCCCTCCCTCTGGTCCTGAGGGAGAGGAATCCTCCTGGGTTTCCAGATCCTGTACCAGAGAGTGACTCTGAGGTTCCGCCCTGCTCTCTGACACAATTAAGGGATAAAATCTCTGAAGGAATGACGGGAAGACGATCCCTCGAATACTGATGAGTGGTTCCCTTTGACACACACAGGCAGCAGCCTTGGGCCCGTGACTTTTCCTCTCAGGCCTTGTTCTCTGCTTCACACTCAATGTGTGTGGGGGTCTGAGTCCAGCACTTCTGAGTCCTTCAGCCTCCACTCAGGTCAGGACCAGAAGTCGCTGTTCCCTCTTCAGGGACTAGAATTTTCCACGGAATAGGAGATTATCCCAGGTGCCTGTGTCCAGGCTGGTGTCTGGGTTCTGTGCTCCCTTCCCCATCCCAGGTGTCCTGTCCATTCTCAAGATAGCCACATGTGTGCTGGAGGAGTGTCCCATGACAGATGCAAAATGCCTGAATGATCTGACTCTTCCTGACAGACGCCCCCAAGACGCATATGACTCACCACGCTGTCTCTGACCATGAGGCCACCCTGAGGTGCTGGGCCCTGAGCTTCTACCCTGCGGAGATCACACTGACCTGGCAGCGGGATGGGGAGGACCAGACCCAGGACACGGAGCTCGTGGAGACCAGGCCTGCAGGGGATGGAACCTTCCAGAAGTGGGCGGCTGTGGTGGTGCCTTCTGGACAGGAGCAGAGATACACCTGCCATGTGCAGCATGAGGGTCTGCCCAAGCCCCTCACCCTGAGATGGGGTAAGGAGGGAGACGGGGGTGTCATGTCTTTTAGGGAAAGCAGGAGCCTCTCTGGAGACCTTTAGCAGGGTCAGGGCCCCTCACCTTCCCCTCTTTTCCCAGAGCCGTCTTCCCAGCCCACCATCCCCATCGTGGGCATCATTGCTGGCCTGGTTCTCTTTGGAGCTGTGATCACTGGAGCTGTGGTCGCTGCTGTGATGTGGAGGAGGAAGAGCTCAGGTGGGGAAGGGGTGAAGGGTGGGGTCTGAGATTTCTTGTCTCACTGAGGGTTCCAAGACCCAGGTAGAAGTGTGCCCTGCCTCGTTACTGGGAAGCACCACCCACAATTATGGGCCTACCCAGCCTGGGCCCTGTGTGCCAGCACTTACTCTTTTGTAAAGCACCTGTTAAAATGAAGGACAGATTTATCACCTTGATTACAGCGGTGATGGGACCTGATCCCAGCAGTCACAAGTCACAGGGGAAGGTCCCTGAGGACAGACTTCAGGAGGGCGGTTGGTCCAGGACCCACACCTGCTTTCTTCATGTTTCCTGATCCCGCCCTGGGTCTGCAGTCACACATTTCTGGAAACTTCTCTGAGGTCCAAGACTTGGAGGTTCCTCTAGGACCTTAAGGCCCTGACTCCTTTCTGGTATCTCACAGGACATTTTCTTCCCACAGATAGAAAAGGAGGGAGCTACTCTCAGGCTGCAAGTAAGTATGAAGGAGGCTGATGCCTGAGGTCCTTGGGATATTGTGTTTGGGAGCCCATGGGGGAGCTCACCCACCCCACAATTCCTCCTCTAGCCACATCTTCTGTGGGATCTGACCAGGTTCTGTTTTTGTTCTACCCCAGGCAGTGACAGTGCCCAGGGCTCTGATGTGTCTCTCACAGCTTGTAAAGGTGAGAGCCTGGAGGGCCTGATGTGTGTTGGGTGTTGGGCGGAACAGTGGACACAGCTGTGCTATGGGGTTTCTTTCCATTGGATGTATTGAGCATGCGATGGGCTGTTTAAAGTGTGACCCCTCACTGTGACAGATACGAATTTGTTCATGAATATTTTTTTCTATAGTGTGAGACAGCTGCCTTGTGTGGGACTGAGAGGCAAGAGTTGTTCCTGCCCTTCCCTTTGTGACTTGAAGAACCCTGACTTTGTTTCTGCAAAGGCACCTGCATGTGTCTGTGTTCGTGTAGGCATAATGTGAGGAGGTGGGGAGACCACCCCACCCCCATGTCCACCATGACCCTCTTCCCACGCTGACCTGTGCTCCCTCCCCAATCATCTTTCCTGTTCCAGAGAGGTGGGGCTGAGGTGTCTCCATCTCTGTCTCAACTTCATGGTGCACTGAGCTGTAACTTCTTCCTTCCCTATTAAAA"
+"gB exons 2,3,4"	""	"GATCAGGACGAAGTCCCAGGTCCCGGACGGGGCTCTCAGGGTCTCAGGCTCCGAGGGCCGCGTCTGCAATGGGGAGGCGCAGCGTTGGGGATTCCCCACTCCCACGAGTTTCACTTCTTCTCCCAACCTATGTCGGGTCCTTCTTCCAGGATACTCGTGACGCGTCCCCATTTCCCACTCCCATTGGGTGTCGGGTGTCTAGAGAAGCCAATCAGTGTCGCCGGGGTCCCAGTTCTAAAGTCCCCACGCACCCACCCGGACTCAGAATCTCCTCAGACGCCGAGATGCGGGTCACGGCGCCCCGAACCGTCCTCCTGCTGCTCTGGGGGGCCCTGGCCCTGACCGAGACCTGGGCCGGTGAGTGCGGGGTCGGGAGGGAAATGGCCTCTGCCGGGAGGAGCGAGGGGACCGCAGGCGGGGGCGCAGGACCTGAGGAGCCGCGCCGGGAGGAGGGTCGGGCGGGTCTCAGCCCCTCCTCACCCCCAGGCTCCCACTCCATGAGGTATTTCTACACCGCCATGTCCCGGCCCGGCCGCGGGGAGCCCCGCTTCATCGCAGTGGGCTACGTGGACGACACCCAGTTCGTGAGGTTCGACAGCGACGCCGCGAGTCCGAGGAAGGAGCCGCGGGCGCCATGGATAGAGCAGGAGGGGCCGGAGTATTGGGACCGGAACACACAGATCTCCAAGACCAACACACAGACTTACCGAGAGAGCCTGCGGAACCTGCGCGGCTACTACAACCAGAGCGAGGCCGGTGAGTGACCCCGGCCCGGGGCGCAGGTCACGACTCCCCATCCCCCACGTACGGCCCGGGTCGCCCCGAGTCTCCGGGTCCGAGATCCGCCTCCCTGAGGCCGCGGGACCCGCCCAGACCCTCGACCGGCGAGAGCCCCAGGCGCGTTTACCCGGTTTCATTTTCAGTTGAGGCCAAAATCCCCGCGGGTTGGTCGGGGCGGGGCGGGGCTCGGGGGGACTGGGCTGACCGCGGGGCCGGGGCCAGGGTCTCACACCCTCCAGAGGATGTACGGCTGCGACGTGGGGCCGGACGGGCGCCTCCTCCGCGGGCATGACCAGTACGCCTACGACGGCAAGGATTACATCGCCCTGAACGAGGACCTGAGCTCCTGGACCGCGGCGGACACCGCGGCTCAGATCACCCAGCGCAAGTGGGAGGCGGCCCGTGTGGCGGAGCAGCTGAGAGCCTACCTGGAGGGCCTGTGCGTGGAGTGGCTCCGCAGATACCTGGAGAACGGGAAGGAGACGCTGCAGCGCGCGGGTACCAGGGGCAGTGGGGAGCCTTCCCCATCTCCTATAGGTCGCCGGGGATGGCCTCCCACGAGAAGAGGAGGAAAATGGGATCAGCGCTAGAATGTCGCCCTCCGTTGAATGGAGAATGGCATGAGTTTTCCTGAGTTTCCTCTGAGGGCCCCCTCTTCTCTCTAGACAATTTAAGGAATGACGTCTCTGAGGAAATGGAGGGGAAGACAGTCCCTAGAATACTGATCAGGGGTCCCCTTTGACCCCTGCAGCAGCCTTGGGAACCGTGACTTTTCCTCTCAGGCCTTGTTCTCTGCCTCACACTCAGTGTGTTTGGGGCTCTGATTCCAGCACTTCTGAGTCACTTTACCTCCACTCAGATCAGGAGCAGAAGTCCCTGTTCCCCGCTCAGAGACTCGAACTTTCCAATGAATAGGAGATTATCCCAGGTGCCTGCGTCCAGGCTGGTGTCTGGGTTCTGTGCCCCTTCCCCACCCCAGGTGTCCTGTCCATTCTCAGGCTGGTCACATGGGTGGTCCTAGGGTGTCCCATGAAAGATGCAAAGCGCCTGAATTTTCTGACTCTTCCCATCAGACCCCCCAAAGACACACGTGACCCACCACCCCATCTCTGACCATGAGGCCACCCTGAGGTGCTGGGCCCTGGGCTTCTACCCTGCGGAGATCACACTGACCTGGCAGCGGGATGGCGAGGACCAAACTCAGGACACTGAGCTTGTGGAGACCAGACCAGCAGGAGATAGAACCTTCCAGAAGTGGGCAGCTGTGGTGGTGCCTTCTGGAGAAGAGCAGAGATACACATGCCATGTACAGCATGAGGGGCTGCCGAAGCCCCTCACCCTGAGATGGGGTAAGGAGGGGGATGAGGGGTCATATCTCTTCTCAGGGAAAGCAGGAGCCCTTCTGGAGCCCTTCAGCAGGGTCAGGGCCCCTCATCTTCCCCTCCTTTCCCAGAGCCATCTTCCCAGTCCACCGTCCCCATCGTGGGCATTGTTGCTGGCCTGGCTGTCCTAGCAGTTGTGGTCATCGGAGCTGTGGTCGCTGCTGTGATGTGTAGGAGGAAGAGCTCAGGTAGGGAAGGGGTGAGGGGTGGGGTCTGGGTTTTCTTGTCCCACTGGGGGTTTCAAGCCCCAGGTAGAAGTGTTCCCTGCCTCATTACTGGGAAGCAGCATGCACACAGGGGCTAACGCAGCCTGGGACCCTGTGTGCCAGCACTTACTCTTTTGTGCAGCACATGTGACAATGAAGGATGGATGTATCACCTTGATGGTTGTGGTGTTGGGGTCCTGATTCCAGCATTCATGAGTCAGGGGAAGGTCCCTGCTAAGGACAGACCTTAGGAGGGCAGTTGGTCCAGGACCCACACTTGCTTTCCTCGTGTTTCCTGATCCTGCCCTGGGTCTGTAGTCATACTTCTGGAAATTCCTTTTGGGTCCAAGACTAGGAGGTTCCTCTAAGATCTCATGGCCCTGCTTCCTCCCAGTGCCCTCACAGGACATTTTCTTCCCACAGGTGGAAAAGGAGGGAGCTACTCTCAGGCTGCGTGTAAGTGGTGGGGGTGGGAGTGTGGAGGAGCTCACCCACCCCATAATTCCTCCTGTCCCACGTCTCCTGCGGGCTCTGACCAGGTCCTGTTTTTGTTCTACTCCAGCCAGCGACAGTGCCCAGGGCTCTGATGTGTCTCTCACAGCTTGAAAAGGTGAGATTCTTGGGGTCTAGAGTGGGTGGGGTGGCGGGTCTGGGGGTGGGTGGGGCAGAGGGGAAAGGCCTGGGTAATGGAGATTCTTTGATTGGGATGTTTCGCGTGTGTGGTGGGCTGTTTAGAGTGTCATCACTTACCATGACTAACCAGAATTTGTTCATGACTGTTGTTTTCTGTAGCCTGAGACAGCTGTCTTGTGAGGGACTGAGATGCAGGATTTCTTCACGCCTCCCCTTTGTGACTTCAAGAGCCTCTGGCATCTCTTTCTGCAAAGGCACCTGAATGTGTCTGCGTCCCTGTTAGCATAATGTGAGGAGGTGGAGAGACAGCCCACCCTTGTGTCCACTGTGACCCCT"
+"gC exons 2,3,4"	""	"GATCAGGACGAAGTCCCAGGTCCCGGGCGGGGCTCTCAGGGTCTCAGGCTCCAAGGGCCGTGTCTGCACTGGGGAGGCGCCGCGTTGAGGATTCTCCACTCCCCTGAGTTTCACTTCTTCTCCCAACCTGCGTCGGGTCCTTCTTCCTGAATACTCATGACGCGTCCCCAATTCCCACTCCCATTGGGTGTCGGGTTCTAGAGAAGCCAATCAGCGTCTCCGCAGTCCCGGTTCTAAAGTCCCCAGTCACCCACCCGGACTCAGATTCTCCCCAGACGCCGAGATGCGGGTCATGGCGCCCCGAACCCTCATCCTGCTGCTCTCGGGAGCCCTGGCCCTGACCGAGACCTGGGCCTGTGAGTGCGGGGTTGGGAGGGAAACGGCCTCTGCGGAGAGGAACGAGGTGCCCGCCCGGCGAGGGCGCAGGACCCGGGGAGCCGCGCAGGGAGGAGGGTCGGGCGGGTCTCAGCCCCTCCTCGCCCCCAGGCTCCCACTCCATGAGGTATTTCTACACCGCCGTGTCCCGGCCCGGCCGCGGAGAGCCCCGCTTCATCGCAGTGGGCTACGTGGACGACACGCAGTTCGTGCGGTTCGACAGCGACGCCGCGAGTCCGAGAGGGGAGCCGCGGGCGCCGTGGGTGGAGCAGGAGGGGCCGGAGTATTGGGACCGGGAGACACAGAAGTACAAGCGCCAGGCACAGACTGACCGAGTGAGCCTGCGGAACCTGCGCGGCTACTACAACCAGAGCGAGGCCGGTGAGTGACCCCGGCCCGGGGCGCAGGTCACGACCCCTCCTCATCCCCCACGGACGGCCCGGGTCGCCCCAAGTCTCCCGGTCTGAGATCCACCCCAAGGTGAGGCTGCGGAACCCGCCCAGACCCTCGACCGGAGAGAGCCCCAGTCACCTTTACCCGGTTTCATTTTCAGTTTAGGCCAAAATCCCCGCGGGTTGGTCGGGACTGGGGCGGGGCTCGGGGGACGGGGCTGACCACGGGGGCGGGGCCAGGGTCTCACACCCTCCAGAGGATGTATGGCTGCGACCTGGGGCCCGACGGGCGCCTCCTCCGCGGGTATGACCAGTCCGCCTACGACGGCAAGGATTACATCGCCCTGAACGAGGACCTGCGCTCCTGGACCGCCGCGGACACGGCGGCTCAGATCACCCAGCGCAAGTGGGAGGCGGCCCGTGAGGCGGAGCAGCTGAGAGCCTACCTGGAGGGCACGTGCGTGGAGTGGCTCCGCAGATACCTGGAGAACGGGAAGGAGACGCTGCAGCGCGCGGGTACCAGGGGCAGTGGGGAGCCTTCCCCATCTCCCGTAGATCTCCCGGCATGGCCTCCCACGAGGAGGGGAGGAAAATGGGATCAGCGCTAGAATATCGCCCTCCCTTGAATGGAGAATGGGATGAGTTTTCCTGAGTTTCCTCTGAGGGCCCCCTCTGCTCTCTAGGACAATTAAGGGATGAAGTCCTTGAGGAAATGGAGGGGAAGACAGTCCCTGGAATACTGATCAGGGGTCCCCTTTGACCACTTTGACCACTGCAGCAGCTGTGGTCAGGCTGCTGACCTTTCTCTCAGGCCTTGTTCTCTGCCTCACGCTCAATGTGTTTGAAGGTTTGATTCCAGCTTTTCTGAGTCCTTCGGCCTCCACTCAGGTCAGGACCAGAAGTCGCTGTTCCTCCCTCAGAGACTAGAACTTTCCAATGAATAGGAGATTATCCCAGGTGCCTGTGTCCAGGCTGGCGTCTGGGTTCTGTGCCCCCTTCCCCACCCCAGGTGTCCTGTCCATTCTCAGGATGGTCACATGGGCGCTGTTGGAGTGTCGCAAGAGAGATACAAAGTGTCTGAATTTTCTGACTCTTCCCGTCAGAACACCCAAAGACACACGTGACCCACCATCCCGTCTCTGACCATGAGGCCACCCTGAGGTGCTGGGCCCTGGGCTTCTACCCTGCGGAGATCACACTGACCTGGCAGCGGGATGGGGAGGACCAAACTCAGGACACCGAGCTTGTGGAGACCAGGCCAGCAGGAGATGGAACCTTCCAGAAGTGGGCAGCTGTGGTGGTGCCTTCTGGAGAAGAGCAGAGATACACGTGCCATGTGCAGCACGAGGGGCTGCCAGAGCCCCTCACCCTGAGATGGGGTAAGGAGGGGGATGAGGGGTGATGTGTCTTCTCAGGGAAAGCAGAAGTCCTGGAGCCCTTCAGCCGGGTCAGGGCTGAGGCTTGGAGGTCAGGGCCCCTCACCTTCCCCTCCTTTCCCAGAGCCATCTTCCCAGCCCACCATCCCCATCGTGGGCATCGTTGCTGGCCTGGCTGTCCTGGCTGTCCTAGCTGTCCTAGGAGCTGTGGTGGCTGTTGTGATGTGTAGGAGGAAGAGCTCAGGTAGGGAAGGGGTGAGGAGTGGGGTCTGGGTTTTCTTGTTCCACTGGGAGTTTCAAGCCCCAGGTAGAAGTGTGCCCCACCTCGTTACTGGAAGCACCATCCACACATGGGCCATCCCAGCCTGGGACCCTGTGTGCCAGCACTTACTCTGTTGTGAAGCACATGCTGACAATGAAGGACAGATGTATCACCTTGATGATTATGGTGTTGGGGTCCTTGATTCCAGCATTCATGAGTCAGGGGAAGGTCCCTGCTAAGGACAGACCTTAGGAGGGCAGTTGCTTCAGAACCCACAGCTGCTTTCCCCGTGTTTCCTGATCCTGCCCTGGGTCTGCAGTCATAGTTCTGGAAACTTCTCTTGGGTCCAAGACTAGGAGGTTCCCCTAAGATCGCATGGCCCTGCCTCCTCCCTGTCCCCTCACAGGGCATTTTCTTCCCACAGGTGGAAAAGGAGGGAGCTGCTCTCAGGCTGCGTGTAAGTGATGGCGGTGGGCGTGTGGAGGAGCTCACCCACCCCATAATTCCTCTTGTCCCACATCTCCTGCGGGCTCTGACCAGGTCTTTTTTTTTGTTCTACCCCAGCCAGCAACAGTGCCCAGGGCTCTGATGAGTCTCTCATCGCTTGTAAAGGTGAGATTCTGGGGAGCTGAAGTGGTCGGGGGTGGGGCAGAGGGAAAAGGCCTAGGTAATGGGGATCCTTTGATTGGGACGTTTCGAATGTGTGGTGAGCTGTTCAGAGTGTCATCACTTACCATGACTGACCTGAATTTGTTCATGACTATTGTGTTCTGTAGCCTGAGACAGCTGCCTGTGTGGGACTGAGATGCAGGATTTCTTCACACCTCTCCTTTGTGACTTCAAGAGCCTCTGGCATCTCTTTCTGCAAAGGCATCTGAATGTGTCTGCGTTCCTGTTAGCATAATGTGAGGAGGTGGAGAGACAGCCCACCCCCGTGTCCACCGTGACCCCT"
+HERE_TERMINATOR
+SETUP_TERMINATOR
+}
+
+sub printCreateAmpCmd {
+    my ($fh) = @_;
+    print $fh <<SETUP_TERMINATOR;
+create amplicon -checkPrimerMatch false -file - << HERE_TERMINATOR
+"Name"	"Annotation"	"Reference"	"Primer1"	"Primer2"	"Start"	"End"
+"DPB1-2"	""	"DPB1 exon 2"	GCTGCAGGAGAGTGGCGCCTCCGCTCAT	CGGATCCGGCCCAAAGCCCTCACTC	29	316
+"DQA1-2"	""	"DQA1 exon 2"	GTTTCTTCCATCATTTTGTGTATTAAGGT	CCATGACAAGATCTGGGGACCTCT	30	396
+"DQB1-2"	""	"DQB1 exon 2"	AGGATCCCCGCAGAGGATTTCGTGTACCA	TCCTGCAGGACGCTCACCTCTCCGCTGCA	30	271
+"DQB1-3"	""	"DQB1 exon 3"	TGGAGCCCACAGTGACCATCTCC	AGTGACATCAGGGATAAGAGATGGGAA	24	354
+"DRBx-2"	""	"DRBx exon 2"	CCGGATCCTTCGTGTCCCCACAGCACG	CCGAATTCCGCTGCACTGTGAAGCTCTC	28	268
+"A-2"	""	"gA exons 2,3,4"	GAAACGGCCTCTGTGGGGAGAAGCAA	GGTGGATCTCGGACCCGGAGACTGT	420	839
+"A-3"	""	"gA exons 2,3,4"	GACTGGGCTGACCTCGGGGT	GAGGGTGATATTCTAGTGTTGGTCCCAA	1006	1366
+"A-4"	""	"gA exons 2,3,4"	GGTTCTGTGCTCTCTTCCCCAT	GGGCTTGGAACCCTCAGTGA	1792	2425
+"B-2"	""	"gB exons 2,3,4"	AGAGCTCGGGAGGAGCGAGGGGACCGCAG	ACTCGAGGCCTCGCTCTGGTTGTAGTA	415	734
+"B-3"	""	"gB exons 2,3,4"	AGAGCTCGGGCCAGGGTCTCACA	ACTCGAGGGAGGCCATCCCCGGCGACCTAT	1012	1313
+"B-4"	""	"gB exons 2,3,4"	CTGGTCACATGGGTGGTCC	AGATATGACCCCTCATCCC	1799	2138
+"C-2"	""	"gC exons 2,3,4"	AGTCGACGAAACGGCCTCTGCGGA	ACTCGAGGGGCTGGGGTCACTCA	394	757
+"C-3"	""	"gC exons 2,3,4"	ACGTCGACGGGCCAGGGTCTCACA	ACCTCGAGGTCAGCAGCCTGACCACA	1017	1549
+"C-4A"	""	"gC exons 2,3,4"	CAAAGTGTCTGAATTTTCTGACTCTTCCC	TGAAGGGCTCCAGAAGGACTT	1866	2191
+"C-4B"	""	"gC exons 2,3,4"	CAAAGTGTCTGAATTTTCTGACTCTTCCC	TGAAGGGCTCCAGGACTT	1866	2191
+HERE_TERMINATOR
+SETUP_TERMINATOR
+}
+
+sub loadAmpData {
+    $allAmpData{"DPB1-2"}{"primer1"}   = "GCTGCAGGAGAGTGGCGCCTCCGCTCAT";
+    $allAmpData{"DPB1-2"}{"primer2"}   = "CGGATCCGGCCCAAAGCCCTCACTC";
+    $allAmpData{"DPB1-2"}{"reference"} = "DPB1 exon 2";
+
+    $allAmpData{"DQA1-2"}{"primer1"}   = "GTTTCTTCCATCATTTTGTGTATTAAGGT";
+    $allAmpData{"DQA1-2"}{"primer2"}   = "CCATGACAAGATCTGGGGACCTCT";
+    $allAmpData{"DQA1-2"}{"reference"} = "DQA1 exon 2";
+
+    $allAmpData{"DQB1-2"}{"primer1"}   = "AGGATCCCCGCAGAGGATTTCGTGTACCA";
+    $allAmpData{"DQB1-2"}{"primer2"}   = "TCCTGCAGGACGCTCACCTCTCCGCTGCA";
+    $allAmpData{"DQB1-2"}{"reference"} = "DQB1 exon 2";
+
+    $allAmpData{"DQB1-3"}{"primer1"}   = "TGGAGCCCACAGTGACCATCTCC";
+    $allAmpData{"DQB1-3"}{"primer2"}   = "AGTGACATCAGGGATAAGAGATGGGAA";
+    $allAmpData{"DQB1-3"}{"reference"} = "DQB1 exon 3";
+
+    $allAmpData{"DRBx-2"}{"primer1"}   = "CCGGATCCTTCGTGTCCCCACAGCACG";
+    $allAmpData{"DRBx-2"}{"primer2"}   = "CCGAATTCCGCTGCACTGTGAAGCTCTC";
+    $allAmpData{"DRBx-2"}{"reference"} = "DRBx exon 2";
+
+    $allAmpData{"A-2"}{"primer1"}   = "GAAACGGCCTCTGTGGGGAGAAGCAA";
+    $allAmpData{"A-2"}{"primer2"}   = "GGTGGATCTCGGACCCGGAGACTGT";
+    $allAmpData{"A-2"}{"reference"} = "gA exons 2,3,4";
+
+    $allAmpData{"A-3"}{"primer1"}   = "GACTGGGCTGACCTCGGGGT";
+    $allAmpData{"A-3"}{"primer2"}   = "GAGGGTGATATTCTAGTGTTGGTCCCAA";
+    $allAmpData{"A-3"}{"reference"} = "gA exons 2,3,4";
+
+    $allAmpData{"A-4"}{"primer1"}   = "GGTTCTGTGCTCTCTTCCCCAT";
+    $allAmpData{"A-4"}{"primer2"}   = "GGGCTTGGAACCCTCAGTGA";
+    $allAmpData{"A-4"}{"reference"} = "gA exons 2,3,4";
+
+    $allAmpData{"B-2"}{"primer1"}   = "AGAGCTCGGGAGGAGCGAGGGGACCGCAG";
+    $allAmpData{"B-2"}{"primer2"}   = "ACTCGAGGCCTCGCTCTGGTTGTAGTA";
+    $allAmpData{"B-2"}{"reference"} = "gB exons 2,3,4";
+
+    $allAmpData{"B-3"}{"primer1"}   = "AGAGCTCGGGCCAGGGTCTCACA";
+    $allAmpData{"B-3"}{"primer2"}   = "ACTCGAGGGAGGCCATCCCCGGCGACCTAT";
+    $allAmpData{"B-3"}{"reference"} = "gB exons 2,3,4";
+
+    $allAmpData{"B-4"}{"primer1"}   = "CTGGTCACATGGGTGGTCC";
+    $allAmpData{"B-4"}{"primer2"}   = "AGATATGACCCCTCATCCC";
+    $allAmpData{"B-4"}{"reference"} = "gB exons 2,3,4";
+
+    $allAmpData{"C-2"}{"primer1"}   = "AGTCGACGAAACGGCCTCTGCGGA";
+    $allAmpData{"C-2"}{"primer2"}   = "ACTCGAGGGGCTGGGGTCACTCA";
+    $allAmpData{"C-2"}{"reference"} = "gC exons 2,3,4";
+
+    $allAmpData{"C-3"}{"primer1"}   = "ACGTCGACGGGCCAGGGTCTCACA";
+    $allAmpData{"C-3"}{"primer2"}   = "ACCTCGAGGTCAGCAGCCTGACCACA";
+    $allAmpData{"C-3"}{"reference"} = "gC exons 2,3,4";
+
+    $allAmpData{"C-4A"}{"primer1"}   = "CAAAGTGTCTGAATTTTCTGACTCTTCCC";
+    $allAmpData{"C-4A"}{"primer2"}   = "TGAAGGGCTCCAGAAGGACTT";
+    $allAmpData{"C-4A"}{"reference"} = "gC exons 2,3,4";
+
+    $allAmpData{"C-4B"}{"primer1"}   = "CAAAGTGTCTGAATTTTCTGACTCTTCCC";
+    $allAmpData{"C-4B"}{"primer2"}   = "TGAAGGGCTCCAGGACTT";
+    $allAmpData{"C-4B"}{"reference"} = "gC exons 2,3,4";
+}
+
+sub printCreateVariantCmd {
+    my ($fh) = @_;
+    print $fh <<SETUP_TERMINATOR;
+create variant -status accepted -file - << HERE_TERMINATOR
+"Name"	"Reference"	"Pattern"
+HERE_TERMINATOR
+SETUP_TERMINATOR
+}
+
+sub printCreateMIDsCmd {
+    my ($fh) = @_;
+    print $fh <<SETUP_TERMINATOR;
+create midGroup -file - << HERE_TERMINATOR
+"Name"
+"454Extended"
+HERE_TERMINATOR
+
+create mid -file - << HERE_TERMINATOR
+"Name"	"Annotation"	"Sequence"	"MidGroup"
+Mid1		ACGAGTGCGT	454Extended
+Mid2		ACGCTCGACA	454Extended
+Mid3		AGACGCACTC	454Extended
+Mid4		AGCACTGTAG	454Extended
+Mid5		ATCAGACACG	454Extended
+Mid6		ATATCGCGAG	454Extended
+Mid7		CGTGTCTCTA	454Extended
+Mid8		CTCGCGTGTC	454Extended
+Mid9		TAGTATCAGC	454Extended
+Mid10		TCTCTATGCG	454Extended
+Mid11		TGATACGTCT	454Extended
+Mid12		TACTGAGCTA	454Extended
+Mid13		CATAGTAGTG	454Extended
+Mid14		CGAGAGATAC	454Extended
+Mid15		ATACGACGTA	454Extended
+Mid16		TCACGTACTA	454Extended
+SETUP_TERMINATOR
+    print $fh <<SETUP_TERMINATOR;
+HERE_TERMINATOR
+SETUP_TERMINATOR
+}
+
+sub loadMidData {
+    $allMidData{"Mid1"}{"sequence"}  = "ACGAGTGCGT";
+    $allMidData{"Mid2"}{"sequence"}  = "ACGCTCGACA";
+    $allMidData{"Mid3"}{"sequence"}  = "AGACGCACTC";
+    $allMidData{"Mid4"}{"sequence"}  = "AGCACTGTAG";
+    $allMidData{"Mid5"}{"sequence"}  = "ATCAGACACG";
+    $allMidData{"Mid6"}{"sequence"}  = "ATATCGCGAG";
+    $allMidData{"Mid7"}{"sequence"}  = "CGTGTCTCTA";
+    $allMidData{"Mid8"}{"sequence"}  = "CTCGCGTGTC";
+    $allMidData{"Mid9"}{"sequence"}  = "TAGTATCAGC";
+    $allMidData{"Mid10"}{"sequence"} = "TCTCTATGCG";
+    $allMidData{"Mid11"}{"sequence"} = "TGATACGTCT";
+    $allMidData{"Mid12"}{"sequence"} = "TACTGAGCTA";
+    $allMidData{"Mid13"}{"sequence"} = "CATAGTAGTG";
+    $allMidData{"Mid14"}{"sequence"} = "CGAGAGATAC";
+    $allMidData{"Mid15"}{"sequence"} = "ATACGACGTA";
+    $allMidData{"Mid16"}{"sequence"} = "TCACGTACTA";
+}
+
+sub printCreateSamplesCmd {
+    my ($fh) = @_;
+    print $fh <<SETUP_TERMINATOR;
+create sample -file - << HERE_TERMINATOR
+"Name"	"Annotation"
+SETUP_TERMINATOR
+    foreach my $rd (@rdFiles) {
+        my ( $rdPrefix, $region ) = ( $rd =~ /^(\S+)(\d\d)$/ );
+        foreach my $col (@validCols) {
+            my $sample = &leadingZeroPad( $col, 2 );
+            my $sName = "${rdPrefix}_${region}_Samp_${sample}";
+            $sName .= "_Neg_Ctrl" if ( $col == 11 );
+            print $fh <<SETUP_TERMINATOR;
+"$sName"	
+SETUP_TERMINATOR
+        }
+        foreach my $uMid (@unusedMids) {
+            my $sample = &leadingZeroPad( $uMid, 2 );
+            my $sName = "${rdPrefix}_${region}_X_UM${sample}";
+            print $fh <<SETUP_TERMINATOR;
+"$sName"	
+SETUP_TERMINATOR
+        }
+    }
+    print $fh <<SETUP_TERMINATOR;
+HERE_TERMINATOR
+SETUP_TERMINATOR
+}
+
+sub leadingZeroPad {
+
+    # Leading zero pad a number to a total length of $digits.
+    my ( $num, $digits ) = @_;
+    my $numLength = length($num);
+    my $diff      = $digits - $numLength;
+    $num = ( '0' x $diff ) . $num if ($diff);
+    return ($num);
+}
+
+sub printCreateMultiplexerCmd {
+    my ($fh) = @_;
+    print $fh <<SETUP_TERMINATOR;
+create multiplexer -file - << HERE_TERMINATOR
+"Name"	"Annotation"	"Encoding"
+SETUP_TERMINATOR
+    foreach my $rd (@rdFiles) {
+        my ( $rdPrefix, $region ) = ( $rd =~ /^(\S+)(\d\d)$/ );
+        print $fh <<SETUP_TERMINATOR;
+"Mult_${rdPrefix}_Region_${region}"		"either"
+SETUP_TERMINATOR
+    }
+    print $fh <<SETUP_TERMINATOR;
+HERE_TERMINATOR
+SETUP_TERMINATOR
+}
+
+sub printImportRdCmd {
+    my ( $fh, $rdPath, $rdFilesRef ) = @_;
+    my $linkState = ( $linkSff ? 'true' : 'false' );
+
+    print $fh <<SETUP_TERMINATOR;
+    create readGroup -file - << HERE_TERMINATOR
+"Name"	"Annotation"
+SETUP_TERMINATOR
+    my %printedPrefix = ();
+    foreach my $rd (@rdFiles) {
+        my ( $rdPrefix, $region ) = ( $rd =~ /^(\S+)(\d\d)$/ );
+        next if ( exists( $printedPrefix{$rdPrefix} ) );
+        print $fh <<SETUP_TERMINATOR;
+"ReadGrp_${rdPrefix}"	
+SETUP_TERMINATOR
+        $printedPrefix{$rdPrefix} = 1;
+    }
+    print $fh <<SETUP_TERMINATOR;
+HERE_TERMINATOR
+	
+load -file - << HERE_TERMINATOR
+"SffDir"	"SffName"	"ReadGroup"	"SymLink"	"Name"
+SETUP_TERMINATOR
+
+    foreach my $rd ( @{$rdFilesRef} ) {
+        my ($rdPrefix) = ( $rd =~ /^(\S+)\d\d$/ );
+        print $fh <<SETUP_TERMINATOR;
+"$rdPath"	"${rd}.sff"	"ReadGrp_${rdPrefix}"	"$linkState"	"$rd"
+SETUP_TERMINATOR
+    }
+    print $fh <<SETUP_TERMINATOR;
+HERE_TERMINATOR
+
+update readData -file - << HERE_TERMINATOR
+"Name"	"Annotation"	"Active"
+SETUP_TERMINATOR
+
+    foreach my $rd ( @{$rdFilesRef} ) {
+        print $fh <<SETUP_TERMINATOR;
+"$rd"		"true"
+SETUP_TERMINATOR
+    }
+    print $fh <<SETUP_TERMINATOR;
+HERE_TERMINATOR
+SETUP_TERMINATOR
+}
+
+sub printRdMuxMidSampAmpAssoc {
+    my ($fh) = @_;
+    print $fh <<SETUP_TERMINATOR;
+assoc -file - << HERE_TERMINATOR
+"ReadData"	"Multiplexer"	"Primer1Mid"	"OfPrimer1MidGroup"	"Primer2Mid"	"OfPrimer2MidGroup"	"Sample"	"Amplicon"
+SETUP_TERMINATOR
+    foreach my $rd (@rdFiles) {
+        my ( $rdPrefix, $reg ) = ( $rd =~ /^(\S+)(\d\d)$/ );
+        foreach my $col (@validCols) {
+            my $mid   = $col2Mid{$col};
+            my $samp  = &leadingZeroPad( $col, 2 );
+            my $sName = "${rdPrefix}_${reg}_Samp_${samp}";
+            $sName .= '_Neg_Ctrl' if ( $col == 11 );
+            print $fh <<SETUP_TERMINATOR;
+"$rd"	"Mult_${rdPrefix}_Region_${reg}"	"Mid${mid}"	"454Extended"	"Mid${mid}"	"454Extended"	"$sName"	"*"
+SETUP_TERMINATOR
+        }
+        foreach my $uMid (@unusedMids) {
+            my $samp = &leadingZeroPad( $uMid, 2 );
+            my $sName = "${rdPrefix}_${reg}_X_UM${samp}";
+            print $fh <<SETUP_TERMINATOR;
+"$rd"	"Mult_${rdPrefix}_Region_${reg}"	"Mid${uMid}"	"454Extended"	"Mid${uMid}"	"454Extended"	"$sName"	"*"
+SETUP_TERMINATOR
+        }
+    }
+    print $fh <<SETUP_TERMINATOR;
+HERE_TERMINATOR
+SETUP_TERMINATOR
+}
+
+sub loadRdMuxMidSampAmpAssocData {
+    foreach my $rd (@rdFiles) {
+        my ( $rdPrefix, $reg ) = ( $rd =~ /^(\S+)(\d\d)$/ );
+        foreach my $col (@validCols) {
+            my $mid   = $col2Mid{$col};
+            my $samp  = &leadingZeroPad( $col, 2 );
+            my $sName = "${rdPrefix}_${reg}_Samp_${samp}";
+            $sName .= '_Neg_Ctrl' if ( $col == 11 );
+            foreach my $ampName ( sort( keys %allAmpData ) ) {
+                my $p1  = $allAmpData{$ampName}{'primer1'};
+                my $p2  = $allAmpData{$ampName}{'primer2'};
+                my $ref = $allAmpData{$ampName}{'reference'};
+
+                $alignData{$sName}{$ref}{$rd} = 1;
+                my $p1rc      = &revComp($p1);
+                my $p2rc      = &revComp($p2);
+                my $midName   = "Mid${mid}";
+                my $mid1Seq   = $allMidData{$midName}{'sequence'};
+                my $mid2Seq   = $mid1Seq;
+                my $mid1SeqRc = &revComp($mid1Seq);
+                my $mid2SeqRc = $mid1SeqRc;
+                my $code      = join( ';',
+                    $p1, $p2, $p1rc, $p2rc, $mid1Seq, $mid2Seq, $mid1SeqRc,
+                    $mid2SeqRc );
+                $sampleAmpData{$sName}{$ampName}{$code} = 1;
+            }
+        }
+        foreach my $uMid (@unusedMids) {
+            my $samp = &leadingZeroPad( $uMid, 2 );
+            my $sName = "${rdPrefix}_${reg}_X_UM${samp}";
+            foreach my $ampName ( sort( keys %allAmpData ) ) {
+                my $p1  = $allAmpData{$ampName}{'primer1'};
+                my $p2  = $allAmpData{$ampName}{'primer2'};
+                my $ref = $allAmpData{$ampName}{'reference'};
+                $alignData{$sName}{$ref}{$rd} = 1;
+                my $p1rc      = &revComp($p1);
+                my $p2rc      = &revComp($p2);
+                my $midName   = "Mid${uMid}";
+                my $mid1Seq   = $allMidData{$midName}{'sequence'};
+                my $mid2Seq   = $mid1Seq;
+                my $mid1SeqRc = &revComp($mid1Seq);
+                my $mid2SeqRc = $mid1SeqRc;
+                my $code      = join( ';',
+                    $p1, $p2, $p1rc, $p2rc, $mid1Seq, $mid2Seq, $mid1SeqRc,
+                    $mid2SeqRc );
+                $sampleAmpData{$sName}{$ampName}{$code} = 1;
+            }
+        }
+    }
+}
+
+sub printRenameSamplesCmd {
+    my ($fh) = @_;
+    if ($isResearcherRun) {
+        print $fh <<SETUP_TERMINATOR;
+rename sample -file - << HERE_TERMINATOR
+"Name"	"NewName"
+SETUP_TERMINATOR
+        foreach my $rd (@rdFiles) {
+            my ( $rdPrefix, $regNum ) = ( $rd =~ /^(\S+)(\d\d)$/ );
+            foreach my $col (@validCols) {
+                my $mid         = $col2Mid{$col};
+                my $samp        = &leadingZeroPad( $col, 2 );
+                my $oldSampName = "${rdPrefix}_${regNum}_Samp_${samp}";
+                $oldSampName .= '_Neg_Ctrl' if ( $col == 11 );
+                my $newName = "${rdPrefix}_${regNum}_MID${mid}";
+                print $fh <<SETUP_TERMINATOR;
+"$oldSampName"	"$newName"
+SETUP_TERMINATOR
+            }
+            foreach my $uMid (@unusedMids) {
+                my $samp        = &leadingZeroPad( $uMid, 2 );
+                my $oldSampName = "${rdPrefix}_${regNum}_X_UM${samp}";
+                my $newName     = "${rdPrefix}_${regNum}_MID${uMid}";
+                print $fh <<SETUP_TERMINATOR;
+"$oldSampName"	"$newName"
+SETUP_TERMINATOR
+            }
+        }
+        print $fh <<SETUP_TERMINATOR;
+HERE_TERMINATOR
+SETUP_TERMINATOR
+    }
+}
+
+sub loadRenameSampleData {
+    if ($isResearcherRun) {
+        foreach my $rd (@rdFiles) {
+            my ( $rdPrefix, $regNum ) = ( $rd =~ /^(\S+)(\d\d)$/ );
+            foreach my $col (@validCols) {
+                my $mid         = $col2Mid{$col};
+                my $samp        = &leadingZeroPad( $col, 2 );
+                my $oldSampName = "${rdPrefix}_${regNum}_Samp_${samp}";
+                $oldSampName .= '_Neg_Ctrl' if ( $col == 11 );
+                my $newName = "${rdPrefix}_${regNum}_MID${mid}";
+                $newOldSamp{$newName} = $oldSampName;
+            }
+            foreach my $uMid (@unusedMids) {
+                my $samp        = &leadingZeroPad( $uMid, 2 );
+                my $oldSampName = "${rdPrefix}_${regNum}_X_UM${samp}";
+                my $newName     = "${rdPrefix}_${regNum}_MID${uMid}";
+                $newOldSamp{$newName} = $oldSampName;
+            }
+        }
+    } else {
+        foreach my $rd (@rdFiles) {
+            my ( $rdPrefix, $regNum ) = ( $rd =~ /^(\S+)(\d\d)$/ );
+            foreach my $col (@validCols) {
+                my $mid         = $col2Mid{$col};
+                my $samp        = &leadingZeroPad( $col, 2 );
+                my $oldSampName = "${rdPrefix}_${regNum}_Samp_${samp}";
+                $oldSampName .= '_Neg_Ctrl' if ( $col == 11 );
+                $newOldSamp{$oldSampName} = $oldSampName;
+            }
+            foreach my $uMid (@unusedMids) {
+                my $samp = &leadingZeroPad( $uMid, 2 );
+                my $oldSampName = "${rdPrefix}_${regNum}_X_UM${samp}";
+                $newOldSamp{$oldSampName} = $oldSampName;
+            }
+        }
+    }
+}
+
+# Begin Refactored Consensus Fasta Dumper Code
+
+sub genAvaConFasta {
+    my $projPrefix = $projectDir;
+    $projPrefix =~ s/\/+$//;
+    my $dumpDir    = "${workAreaDir}/rawFastaFiles" . time();
+    my $dumpDirInd = $dumpDir . "_ind";
+    my $repAlignCmd =
+"report align -samp * -ref * -readType con -wrap 60 -makeDir all -outputDir $dumpDir -mappingFile conMapFile.txt";
+    my $repAlignCmdInd =
+"report align -samp * -ref * -readType ind -wrap 0 -makeDir all -outputDir $dumpDirInd -mappingFile indMapFile.txt";
+    &logLine(
+"Dumping primary consensus and individual fasta files with the commands\n'$repAlignCmd' and\n'$repAlignCmdInd'.\n"
+    );
+
+    &executeLinuxCmdAndTrapErrors("mkdir $dumpDir");
+
+    my $scriptTemp = "${workAreaDir}/repAlignCli_" . time() . '.txt';
+    open( ST, ">$scriptTemp" ) or &logDie("Can't write '$scriptTemp'");
+    print ST "open $projectDir -control readonly\n";
+    print ST "$repAlignCmd\n";
+    print ST "$repAlignCmdInd\n";
+    print ST "close\n";
+    close(ST);
+
+    $outDirDumper = $outputDirFasta;
+ 
+    my $doAmpCmd = "$doAmpPath $scriptTemp";
+    if ( system($doAmpCmd) ) {
+        &logDie("Problem executing command '$doAmpCmd'");
+    }
+    %outFh         = ();
+    $masterCounter = 0;
+    my $conMap  = "${dumpDir}/conMapFile.txt";
+    my $isFirst = 1;
+    open( CM, "<$conMap" ) or &logDie("Unable to read map file '$conMap'.");
+    while ( defined( my $line = <CM> ) ) {
+        chomp($line);
+        my ( $sample, $ref, $file ) = &quotedTabParse($line);
+        &logLine(
+"Processing Sample '$sample' versus Reference '$ref' alignment file.\n"
+        );
+        my $oldSamp = $newOldSamp{$sample};
+        if ($isFirst) {
+            $isFirst = 0;
+            next;
+        } else {
+            my $rdName = "";
+            if ($groupByReadData) {
+                my @rdNames = ( sort( keys %{ $alignData{$oldSamp}{$ref} } ) );
+                $rdName = join( '_', @rdNames );
+            }
+            my $alignFastaPath = "${dumpDir}/${file}";
+            my $indFastaPath   = "${dumpDirInd}/${file}";
+
+            my $def = "";
+            my $seq = "";
+            if ( -e $alignFastaPath ) {
+                if ( -e $indFastaPath ) {
+                    open( AF, "<$alignFastaPath" )
+                      or &logDie("Can't read $alignFastaPath");
+                    my %conIdMap = ();
+                    &fillConIdMap( \%conIdMap, $indFastaPath );
+                    while ( defined( my $line = <AF> ) ) {
+                        chomp($line);
+                        if ( $line =~ /^>/ ) {
+                            if ($def) {
+                                &printEntry( $def, $seq, $oldSamp, $rdName,
+                                    \%conIdMap );
+                            }
+                            $def = $line;
+                            $seq = "";
+                        } else {
+                            $seq .= $line;
+                        }
+                    }
+                    &printEntry( $def, $seq, $oldSamp, $rdName, \%conIdMap )
+                      if ($def);
+                    close(AF);
+                } else {
+                    &logDie(
+"Consensus file '$alignFastaPath' exists but individual file '$indFastaPath' is missing."
+                    );
+                }
+
+            } else {
+                &logLine("MISSING\t$alignFastaPath\n");
+            }
+        }
+
+    }
+    close(CM);
+    if ($groupBySample) {
+        foreach my $s ( sort( keys %outFh ) ) {
+            my $sFh = $outFh{$s};
+            close($sFh);
+        }
+    }
+    if ($groupByReadData) {
+        foreach my $rd ( sort( keys %outFh ) ) {
+            my $rFh = $outFh{$rd};
+            close($rFh);
+        }
+    }
+
+    &executeLinuxCmdAndTrapErrors("rm -rf $dumpDir");
+    &executeLinuxCmdAndTrapErrors("rm -rf $dumpDirInd");
+    &executeLinuxCmdAndTrapErrors("rm $scriptTemp");
+    &logLine("Output files were written to the directory '$outDirDumper'.\n");
+}
+
+sub fillConIdMap {
+    my ( $conIdMapRef, $indFastaPath ) = @_;
+    open( IFP, "<$indFastaPath" )
+      or &logDie("Can't read $indFastaPath");
+    my $isFirst = 1;
+    while ( defined( my $line = <IFP> ) ) {
+        chomp($line);
+        if ( $line =~ /^>/ ) {
+            if ($isFirst) {
+                $isFirst = 0;
+            } else {
+                my ($indId)  = ( $line =~ /^>(\S+)/ );
+                my ($cLabel) = ( $line =~ /consensusLabel=(\S+)/ );
+                if ( $indId && $cLabel ) {
+                    push( @{ $conIdMapRef->{$cLabel} }, $indId );
+                } else {
+                    &logDie(
+                        "Problem parsing individual read definition '$line'.");
+                }
+            }
+        }
+    }
+    close(IFP);
+}
+
+sub quotedTabParse {
+
+    # Split the line by tabs, remove surrounding quotes if present
+    # from the values, and return them as an array.
+    my ($line) = @_;
+    my @parsedVals = ();
+    my @vals = split( /\t/, $line );
+    foreach my $val (@vals) {
+        if ( $val =~ /^\".*\"$/ ) {
+            $val =~ s/^\"//;
+            $val =~ s/\"$//;
+        }
+        push( @parsedVals, $val );
+    }
+    return (@parsedVals);
+}
+
+sub getOutFh {
+    my ( $samp, $rd, $strand, $amp ) = @_;
+    my $fh   = undef;
+    my $id   = "";
+    my $file = $outDirDumper . "/";
+    if ($groupBySample) {
+        $id = $samp;
+        my $sName = $samp;
+        $sName =~ s/\s/_/g;
+        $file .= $sName;
+    } elsif ($groupByReadData) {
+        $id = $rd;
+        $file .= $rd;
+    }
+    if ($splitByStrand) {
+        my $strandName = ( $strand eq '+' ? 'Forward' : 'Reverse' );
+        $file .= "_${strand}";
+        $id   .= "_${strand}";
+    } elsif ($splitByAmp) {
+        $id .= "_${amp}";
+        my $aName = $amp;
+        $aName =~ s/\s/_/g;
+        $file .= "_${aName}";
+    }
+    $file .= ".fna";
+    if ( exists( $outFh{$id} ) ) {
+        $fh = $outFh{$id};
+    } else {
+        $fh = new FileHandle(">$file")
+          or &logDie("Couldn't open output file '$file' for writing.\n");
+        $outFh{$id} = $fh;
+    }
+    return ($fh);
+}
+
+sub printEntry {
+    my ( $def, $seq, $samp, $rd, $conIdMapRef ) = @_;
+    if ( $def =~ /amplicon=/ ) {
+        my ($rootId) = ( $def =~ /^>(\S+)/ );
+        my ($strand) = ( $def =~ /strand=([\-\+])/ );
+        my ($count)  = ( $def =~ /Count=(\d+)/ );
+        my ($amp)    = ( $def =~ /amplicon=\"([^\"]+)\"/ );
+        my @indIds   = ();
+        if ( exists( $conIdMapRef->{$rootId} ) ) {
+            @indIds = @{ $conIdMapRef->{$rootId} };
+            my $indCount  = scalar(@indIds);
+            my $conWeight = $count;
+            if ( $indCount < $count ) {
+                $count = $indCount;
+                &logLine(
+"Compensating for mismatch between individual count ($indCount) and consensus weight ($conWeight) for $def in favor of individual count.\n",
+                    "Warning"
+                );
+            } elsif ( $indCount > $count ) {
+                &logLine(
+"Compensating for mismatch between individual count ($indCount) and consensus weight ($conWeight) for $def in favor of consensus weight.\n",
+                    "Warning"
+                );
+            }
+
+        } else {
+            &logDie("Could not find $rootId in conIdMap.");
+        }
+        my @codes = ();
+        if ( exists( $sampleAmpData{$samp}{$amp} ) ) {
+            @codes = ( sort( keys %{ $sampleAmpData{$samp}{$amp} } ) );
+        } else {
+            &logDie("Unexpected sample-amp combo ($samp,$amp).");
+        }
+        my $fh = &getOutFh( $samp, $rd, $strand, $amp );
+        my ( $p1, $p2, $p1Rc, $p2Rc, $m1, $m2, $m1Rc, $m2Rc ) =
+          split( /;/, $codes[0] );
+        my $m = "";
+        my $p = "";
+        $seq =~ s/\-//g;
+        my $annot = "amplicon=\"$amp\" strand=$strand";
+        if ($groupByReadData) {
+            $annot = "sample=\"$samp\" " . $annot;
+        }
+        if ( $strand eq '-' ) {
+            $seq = &revComp($seq);
+            if ( $m2 ne '-' ) {
+                $m = $m2;
+            }
+            $p = $p2;
+        } else {
+            if ( $m1 ne '-' ) {
+                $m = $m1;
+            }
+            $p = $p1;
+        }
+        my $fSeq = $m . $p . $seq;
+        if ($includeKey) {
+            $fSeq = $seqKey . $fSeq;
+        }
+        my $seqLen = length($seq);
+        my @seqBlocks = @{ &getStringBlocks( $fSeq, 60 ) };
+        $masterCounter++;
+        for ( my $num = 1 ; $num <= $count ; $num++ ) {
+            my $indId  = shift(@indIds);
+            my $id     = "C_${masterCounter}_${indId}";
+            my $newDef = ">$id $annot insertLen=$seqLen";
+            print $fh join( "\n", ( $newDef, @seqBlocks ) ), "\n";
+        }
+    }
+}
+
+sub getStringBlocks {
+    my ( $string, $blockSize ) = @_;
+    my @blocks   = ();
+    my $startPos = 0;
+    my $lastPos  = length($string) - 1;
+    while ( $startPos <= $lastPos ) {
+        my $availLen = $lastPos - $startPos + 1;
+        my $bLen     = ( $availLen >= $blockSize ? $blockSize : $availLen );
+        my $block    = substr( $string, $startPos, $bLen );
+        push( @blocks, $block );
+        $startPos += $bLen;
+        last if ( $startPos > $lastPos );
+    }
+    return ( \@blocks );
+}
+
+sub revComp {
+    my ($seq) = @_;
+    $seq =~
+tr/-_\*ACGTUMRWSYKVHDBXN\.acgtumrwsykvhdbxn\./-_\*TGCAAKYWSRMBDHVXN\.tgcaakywsrmbdhvxn\./;
+    return ( scalar( reverse($seq) ) );
+}
+

@@ -1,0 +1,142 @@
+#!/bin/bash
+
+############################################################################
+#
+# Copyright (C) 2008-2009 - 454 Life Sciences
+#
+#  This script calls the main startGsProcessor script with either the
+#   signalProcessing pipeline parameter (in the case of continuing processing
+#   after an on-the-fly processing) or fullProcessing in the case of 
+#   starting with the raw images.
+#
+#
+############################################################################
+
+############################################################################
+#
+# It should not be necessary to edit this file.
+# All user settings are expressed as environmental variables.  
+#
+############################################################################
+FULL_PROCESSING_PIPE=fullProcessingAmplicons.xml
+SIG_PROCESSING_PIPE=signalProcessingAmplicons.xml
+
+
+showHelp()
+{
+EXENAME=`basename $0`
+cat <<MOREHELP
+
+usage: $EXENAME [OTHER_OPTIONS_TO_GSRUNPROCESSOR] D_sourceDir
+  or
+       $EXENAME [OTHER_OPTIONS_TO_GSRUNPROCESSOR] R_sourceDir
+
+This application processes data from a 454/Roche instrument.  The
+parameter can either be a directory that contains the results
+of an image processing pipeline or a directory containing a 
+"rawImages" directory.  
+
+In the first case, signal processing and base calling will be 
+performed on the data set. The results will be placed in 
+another directory on the same level as the source directory
+with a name reflecting the processing type. 
+
+In the case that a directory containing a "rawImages" directory is 
+passed, the complete pipeline (image and signal processing) will 
+be run.  The results will be placed in a new D_ directory 
+under the directory passed on the command line.  Also, image 
+processing intermediate results will also be generated in 
+its own D_ directory.
+
+Call 'gsRunProcessor --help' for information on additional
+arguments that can be passed to the gsRunProcessor. 
+MOREHELP
+
+}
+
+
+if test "x$1" == "x"; then
+   echo "You must specify a source directory on the command line."
+   showHelp
+   exit 0
+fi
+
+if [ -e $(dirname $BASH_SOURCE)/startGsProcessor ]; then
+    REAL_GSRUNPROCESSOR_BIN=$(readlink -f $(dirname $BASH_SOURCE 2>/dev/null )/startGsProcessor 2>/dev/null)
+else
+    REAL_GSRUNPROCESSOR_BIN=$(readlink -f $(which startGsProcessor 2>/dev/null) 2>/dev/null)
+fi
+
+if [ -z "${REAL_GSRUNPROCESSOR_BIN}" ]; then
+   echo "ERROR: No gsRunProcessor was found.  Please ensure that gsRunProcessor is in your PATH."
+   exit 1
+fi
+
+
+# See if the user overrode the pipe command
+PFOUND=0
+for aCommand in $*; do
+	if [ "$aCommand" == "--version" -o "$aCommand" == "-V" ]; then
+		echo 
+		echo "NOTE: $(basename $0) is a wrapper script for:"
+		echo
+		$REAL_GSRUNPROCESSOR_BIN --version
+		exit 0
+	fi
+	if [ "$aCommand" == "--help" -o "$aCommand" == "-h" ]; then
+		showHelp
+		exit 0
+	fi
+	if [ $PFOUND -eq 1 ];then
+		PIPELINE_FILE=$aCommand
+		ADDL_ARGS="$ADDL_ARGS -p ${aCommand}"
+		PFOUND=0
+		shift
+	fi
+
+	if [ "${aCommand:0:2}" == "-p" ]; then
+		PFOUND=1
+	elif [ "${aCommand:0:7}" == "--pipe=" ]; then
+		PIPELINE_FILE=${aCommand:7}
+		ADDL_ARGS="$ADDL_ARGS ${aCommand}"
+		shift
+	elif [ "${aCommand:0:2}" == "--" ]; then
+		ADDL_ARGS="$ADDL_ARGS ${aCommand}"
+		shift
+	elif [ "${aCommand:0:1}" == "-" ]; then
+		ADDL_ARGS="$ADDL_ARGS ${aCommand}"
+		shift
+    else
+    	if [ -n "$SOURCE_DIR" ]; then
+			echo 
+   			echo "You may only provide one directory at a time on the command line."	
+   			showHelp
+   			exit 1 	
+		fi
+        SOURCE_DIR="$(readlink -f "${aCommand}")"
+	fi
+	
+done
+	
+if [ -z "$PIPELINE_FILE" ] ; then
+
+        if [ -z "$SOURCE_DIR" ]; then
+                echo
+                echo "Specify a source directory on the command line."
+                echo
+                showHelp
+                exit 1
+        fi
+
+
+	if [ -e "$SOURCE_DIR/dataRunParams.parse" -a -e "$SOURCE_DIR/rawImages" -a -e "$SOURCE_DIR/imageLog.parse" ]; then
+		# The user asked us to analyze a D_directory
+		PIPELINE_FILE=$FULL_PROCESSING_PIPE
+	else
+		PIPELINE_FILE=$SIG_PROCESSING_PIPE
+	fi
+	ADDL_ARGS="--pipe=$PIPELINE_FILE $ADDL_ARGS"
+fi
+
+exec $REAL_GSRUNPROCESSOR_BIN $ADDL_ARGS $SOURCE_DIR
+

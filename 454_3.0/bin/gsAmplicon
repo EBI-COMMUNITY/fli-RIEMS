@@ -1,0 +1,234 @@
+#!/bin/bash
+#
+# ---------------------------------------------------------------------
+# GS Amplicon Variant Analyzer Application Start Script for Linux
+# ---------------------------------------------------------------------
+#
+
+# ---------------------------------------------------------------------
+# Ensure the APP_HOME var for this script points to the
+# home directory where application software is installed on your system.
+# ---------------------------------------------------------------------
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE:-$0}")"
+APP_HOME="$(dirname "$(dirname "$SCRIPT_PATH")")"
+APP_HOME_BIN="$APP_HOME"/bin
+APP_HOME_LIB="$APP_HOME"/lib
+APP_HOME_LIBEXEC="$APP_HOME"/libexec
+APP_HOME_CONFIG="$APP_HOME"/config
+APP_HOME_DOC="$APP_HOME"/doc
+APP_HOME_VIDEO="$APP_HOME"/video
+APP_HOME_CONFIG_FILE="$APP_HOME_CONFIG"/gsAmplicon.vmoptions
+APP_NAME="GS Amplicon Variant Analyzer"
+
+DEFAULT_HEAP_MEM=750
+DEFAULT_PERM_MEM=256
+
+heapMem=$(grep "Xmx" "$APP_HOME_CONFIG_FILE" 2>/dev/null | sed 's/-*[a-zA-Z=:]*//g')
+permMem=$(grep "XX" "$APP_HOME_CONFIG_FILE" 2>/dev/null | sed 's/-*[a-zA-Z=:]*//g')
+
+if [ -z "$heapMem" ]; then heapMem=$DEFAULT_HEAP_MEM; fi
+if [ -z "$permMem" ]; then permMem=$DEFAULT_PERM_MEM; fi
+
+defaultNumCPUs=1
+defaultEnableFeatures=""
+defaultEnableVersion=""
+defaultEnableVerbose=""
+defaultEnableHeadless=false
+defaultRemoteX=""
+
+usage ()
+{
+    # Note: --enable intentionally not included as part of usage statement.
+
+    echo "Usage: $script [--maxHeap <number>] [--maxPerm <number>] [--configDir <directory>] [--cpu <number>]" >&2
+    echo "        --maxHeap   maximum jvm heap space (MB) (default=${heapMem})" >&2
+    echo "        --maxPerm   maximum jvm permgen space (MB) (default=${permMem})" >&2
+    echo "        --configDir application configuration directory (default=${homeConfig})" >&2
+    echo "        --cpu       number of cpus to use when computing project (default=${defaultNumCPUs}), use 0 for max" >&2
+    echo "        --version   reports build version and scm tag" >&2
+    echo "        --verbose   reports same as --version plus environment details" >&2
+    exit 100
+}
+
+homeConfig="$APP_HOME_CONFIG"
+enableFeatures="$defaultEnableFeatures"
+numCPUs=$defaultNumCPUs
+enableVersion="$defaultEnableVersion"
+enableVerbose="$defaultEnableVerbose"
+enableHeadless="$defaultEnableHeadless"
+remoteX="$defaultRemoteX"
+fourFiveFourVersion=3.0
+
+while [ $# -gt 0 ]
+do
+  case "$1" in
+      --maxHeap)
+      if [ $# -lt 2 ]; then usage; fi
+      heapMem="$2"
+      shift 2
+      ;;
+      --maxPerm)
+      if [ $# -lt 2 ]; then usage; fi
+      permMem="$2"
+      shift 2
+      ;;
+      --cpu)
+	  if [ $# -lt 2 ]; then usage; fi
+	  numCPUs="$2"
+	  shift 2
+	  ;;
+      --configDir)
+      if [ $# -lt 2 ]; then usage; fi
+      homeConfig="$2"
+      shift 2
+      ;;
+      --enable)
+      if [ $# -lt 2 ]; then usage; fi
+      enableFeatures="$2"
+      shift 2
+      ;;
+      --version)
+      enableVersion="--version"
+      enableHeadless=true
+      shift
+      ;;
+      --verbose)
+      enableVerbose="--verbose"
+      enableHeadless=true
+      shift
+      ;;
+      --remoteX)
+	  remoteX=1
+	  shift 1
+	  ;;
+      *)
+      break;
+   esac
+done
+
+# Only accept --verbose if --version also requested
+if [ "$enableVerbose" = "--verbose" ]; then
+    if [ "$enableVersion" != "--version" ]; then
+       echo "--verbose may only be used with --version" >&2
+       usage
+    fi
+fi
+
+# Only accept a number
+echo "$heapMem" | grep "[^0-9]" > /dev/null 2>&1
+if [ $? -eq 0 ]; then
+    echo "Value '$heapMem' for --maxHeap is not a positive number" >&2
+    usage
+fi
+
+# Only accept a number
+echo "$permMem" | grep "[^0-9]" > /dev/null 2>&1
+if [ $? -eq 0 ]; then
+    echo "Value '$permMem' for --maxPerm is not a positive number" >&2
+    usage
+fi
+
+# Only accept a number
+echo "$numCPUs" | grep "[^0-9]" > /dev/null 2>&1
+if [ $? -eq 0 ]; then
+    echo "Value '$numCPUs' for --cpu is not a non-negative number" >&2
+    usage
+fi
+
+# Only accept a directory
+if [ ! -d "$homeConfig" ]; then
+    echo "Value '$homeConfig' for --configDir is not a directory" >&2
+    usage
+fi
+
+# ---------------------------------------------------------------------
+# Classpath settings (in addition to the classpath in one-jar)
+# ---------------------------------------------------------------------
+# config order is important, custom first then app default.
+APP_CLASS_PATH="$APP_CLASS_PATH:$homeConfig"
+APP_CLASS_PATH="$APP_CLASS_PATH:$APP_HOME_CONFIG"
+APP_CLASS_PATH="$APP_CLASS_PATH:$APP_HOME_BIN"
+APP_CLASS_PATH="$APP_CLASS_PATH:$APP_HOME_LIBEXEC"
+APP_CLASS_PATH="$APP_CLASS_PATH:$APP_HOME_DOC"
+APP_CLASS_PATH="$APP_CLASS_PATH:$APP_HOME_VIDEO"
+APP_CLASS_PATH="$APP_CLASS_PATH:$APP_HOME/../../bin"
+APP_CLASS_PATH="$APP_CLASS_PATH:$APP_HOME_LIB/amplicons-3.0.one-jar.jar"
+
+export APP_CLASS_PATH
+
+# ---------------------------------------------------------------------
+# Required JVM settings
+# ---------------------------------------------------------------------
+REQUIRED_JVM_ARGS="$REQUIRED_JVM_ARGS -Xmx${heapMem}M -XX:MaxPermSize=${permMem}M"
+REQUIRED_JVM_ARGS="$REQUIRED_JVM_ARGS -Dapp.launch.command.path=$SCRIPT_PATH"
+
+# ---------------------------------------------------------------------
+# Additional JVM options can be set in the vmoptions file, we do not need that
+# ---------------------------------------------------------------------
+if [ -z "$APP_VM_OPTIONS" ]; then
+  APP_VM_OPTIONS="$APP_HOME_CONFIG_FILE"
+fi
+
+# ---------------------------------------------------------------------
+# The -Xmx and -XX from the vmoptions file were read above and applied
+# as the defaults.  Here read in other JVM parameters.
+# ---------------------------------------------------------------------
+ADD_JVM_ARGS=`egrep -v -e '^-Xmx|^-XX' "$APP_VM_OPTIONS" `
+
+# Documentation and Logger Config
+docDir=-Dhelp.base.file="$APP_HOME_DOC"
+loggerConfig=log4j.properties
+
+# New Project Initialization options
+newProjectInitScript=newProjectInit.ava
+scriptLibDir="$homeConfig"/lib
+
+defineLogger=-Dlog4j.configuration="$loggerConfig"
+defineProjectInitScript=-Dcom.fourfivefour.amplicons.cli.newProjectInitScript="$newProjectInitScript"
+defineInitScriptLibDir=-Dcom.fourfivefour.amplicons.cli.libDir="$scriptLibDir"
+defineNumCPUs=-Dcom.fourfivefour.numCPUs="$numCPUs"
+
+# Launch the java application
+STD_JAVA_ARGS=(
+             "$defineLogger"                        \
+             "$docDir" 	                            \
+             "$defineProjectInitScript"             \
+             "$defineInitScriptLibDir"              \
+             "$defineNumCPUs"                       \
+             -Djava.awt.headless="$enableHeadless"  \
+             $REQUIRED_JVM_ARGS                     \
+             $ADD_JVM_ARGS                          \
+             -cp "$APP_CLASS_PATH"                  \
+            )
+
+FINAL_JAVA_ARGS=("${STD_JAVA_ARGS[@]}")
+
+if [ "$enableFeatures" != "" ]; then
+	FINAL_JAVA_ARGS=("-Dcom.fourfivefour.enable=$enableFeatures" "${FINAL_JAVA_ARGS[@]}")
+fi
+
+if [ "$remoteX" != "" ]; then
+	FINAL_JAVA_ARGS=("-Dsun.java2d.pmoffscreen=false" "${FINAL_JAVA_ARGS[@]}")
+fi
+
+
+# ---------------------------------------------------------------------
+# Before you run the application specify the location of the
+# java runtime base directory which will be used for running
+# ---------------------------------------------------------------------
+if [ -z "$APP_JRE_HOME" ]; then
+  APP_JRE_HOME="$APP_HOME/../jre/jre1.6.0_30/"
+  if [ -z "$APP_JRE_HOME" ]; then
+    echo "ERROR: Cannot start the $APP_NAME application."
+    echo "ERROR: Cannot find $APP_JRE_HOME"
+    echo "The required Java runtime environment was not found for the $APP_NAME. Please reinstall or contact support."
+  fi
+fi
+
+export JAVA="$APP_JRE_HOME"/bin/java
+
+
+# ---------------------------------------------------------------------
+# Start
+# ---------------------------------------------------------------------
+exec "$JAVA" "${FINAL_JAVA_ARGS[@]}" com.simontuffs.onejar.Boot $enableVersion $enableVerbose $heapMem $permMem

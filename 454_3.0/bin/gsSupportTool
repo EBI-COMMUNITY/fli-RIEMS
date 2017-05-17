@@ -1,0 +1,1427 @@
+#!/bin/bash
+
+
+# In order to help diagnose problems with a customer's experiments, this 
+# suite of tools collects a subset of information about a sequencing run
+# and packages it up for transmission to personnel at 454 Life Sciences.
+
+# Run this command with the -h parameter for more help.
+
+#
+# Copyright (c) [2007-2014] 454 Life Sciences Corporation.
+# All Rights Reserved.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND 
+# NONINFRINGEMENT.  
+#
+# IN NO EVENT SHALL 454 LIFE SCIENCES CORPORATION  BE LIABLE FOR ANY 
+# CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+# SOFTWARE.
+
+
+# --------------------------------------------------------- #
+# User settable parameters 
+# --------------------------------------------------------- #
+default_data_dir=$RIGDATA
+default_config_file_name=runSupport.cfg
+
+# --------------------------------------------------------- #
+# DO NOT EDIT BELOW THIS POINT
+# --------------------------------------------------------- #
+version_major="3"
+version_minor="0"
+build_number="v20140328_1611"
+title="GS Support Tool"
+
+
+# Global variables
+support_tool_settings=~/.supportTool
+
+# one of silent,terminal,xwindows or java
+interface="terminal"
+	
+# transport mode
+# one of ftp,cd,filesystem,email,removable
+transport=
+
+need_data_dir=1
+roche_cui=" "
+enable_encryption=1
+enable_tidy=1
+
+# Internet connectivity variables
+no_internet=0
+ftp_available=0
+ftp_login=gs_support:po07zbmq
+ftp_site=ftp://ftp.dia.roche.com
+destination_email=service.sequencing@roche.com
+mail_server=
+mail_server_acct=
+mail_server_password=
+
+declare -a CWF_FILE
+list_items=
+list_values=
+list_selected="on"
+
+# --------------------------------------------------------- #
+# printHelp ()                                              #
+# Prints the help message.                                  #
+# --------------------------------------------------------- #
+printHelp ()
+{
+	echo
+	echo "This utility packages, compresses and sends a set of data from a rig to Roche/454 for diagnostics."
+	echo
+	echo "Usage: gsSupportTool [options] [source directory]"
+	echo
+	echo "-cCFG            Use config file CFG (default is to query user)"
+	echo "-h               Help: this message"
+	echo "-n               Do not use network"
+	echo "-oDIR            Save output package to directory DIR"
+	echo "-p               Send file in plain text (i.e. never encrypt)"
+	echo "-f[SITE]         Sends via FTP (default ${ftp_site:6})"
+	echo "-lUSER[:PASS]    Sets FTP login information"
+#	echo "-e[ADDRESS]      Emails the package (default $destination_email)"
+#	echo "-mSERVER         Local e-mail server relay"
+#	echo "-uUSER[:PASS]    Local e-mail server relay user login"
+	echo "-q               Quiet (no input or output)"
+	echo "-t               Forces text mode, even if X windows is available"
+	echo "--version or -V  Display version"	
+	echo
+	echo "If no parameter is given to the FTP destination, defaults will be used." 
+	echo
+}
+
+# --------------------------------------------------------- #
+# messageSilent ()                                          #
+# Eats the output so that the system doesn't print anything.#
+# --------------------------------------------------------- #
+messageSilent ()
+{
+	:
+}
+
+# --------------------------------------------------------- #
+# progressSilent ()                                         #
+# Eats the output so that the system doesn't print anything.#
+# --------------------------------------------------------- #
+progressSilent ()
+{
+    awk -- '{}'
+}
+
+# --------------------------------------------------------- #
+# passwordSilent ()
+# The password needs to be specified on the command line    #
+# if we are running in non-interactive mode.                #
+# --------------------------------------------------------- #
+passwordSilent ()
+{
+   echo "The password must be specified on the command line." >&2
+   echo 
+   exit 1
+}
+
+# --------------------------------------------------------- #
+# messageTerminal ()                                        #
+# Echos a message to std out instead of an dialog box.      #
+# --------------------------------------------------------- #
+messageTerminal ()
+{
+	echo
+	echo -e $1 | sed -e 's/.*/= &/' 
+	if [[ "$2" == "msg_proceed_can" ]]; then
+		echo "="
+		echo "[Press 'Y' to proceed, any other key to exit]"
+		read -sn1 val
+		if [ "$val" == "y" -o "$val" == "Y" ]; then
+			return 0
+		else
+			return 1
+		fi 
+	elif [[ "$2" != "info" ]]; then
+		echo "[Press Enter]"
+		if [ "$3" -gt 0 ]; then
+			TMOUT=$3 read
+		else
+			read
+		fi
+	fi
+
+	return 0
+}
+
+# --------------------------------------------------------- #
+# progressTerminal ()                                       #
+# Prints percentages to the terminal                        #
+# --------------------------------------------------------- #
+progressTerminal ()
+{
+    awk -- '{ORS="";} /^[0-9]+/ { print "\0338\0337"$0" %"; f=1; } /^[=[]/ { print "\n"$0; f=1; } { if(!f) { print "\015\033[K"$0"... \0337"; } f=0; fflush(); }' >&4
+}
+
+# --------------------------------------------------------- #
+# passwordTerminal ()                                       #
+# ----------------------------------------------------------#
+passwordTerminal ()
+{
+	stty -echo
+        read -p "$1: " passwd
+	stty echo
+	echo $passwd
+	if [ -z "$passwd" ]; then
+	   return 1
+	fi
+	return 0
+}
+
+# --------------------------------------------------------- #
+# addListTerminal ()                                        #
+# ----------------------------------------------------------#
+addListTerminal ()
+{
+	if [[ -z "$3" || "$3" != "unavailable" ]]; then
+           if [ -z "$list_items" ]; then
+		list_items=$1
+		list_values=$2
+	   else
+		list_items=$list_items"	$1"
+		list_values=$list_values"|$2"
+	   fi
+        fi
+
+}
+
+# --------------------------------------------------------- #
+# inputTerminal ()                                          #
+# Asks for a text input.                                    #
+# --------------------------------------------------------- #
+inputTerminal ()
+{
+	read -p "$1: " input
+	echo $input
+}
+
+
+# --------------------------------------------------------- #
+# messageXwindows ()                                        #
+# Echos a message to an Xdialog box.                        #
+# --------------------------------------------------------- #
+messageXwindows ()
+{
+	local BOX_HEIGHT
+	if [ ${#1} -gt 150 ]; then	
+	   BOX_HEIGHT=20
+	   BOX_WIDTH=80
+	else
+	   BOX_HEIGHT=15
+	   if [ $4 -eq 1 ]; then
+	   	BOX_WIDTH=90
+ 	   else
+		BOX_WIDTH=50
+	   fi 
+	fi
+
+	if [ "$2" = "info" ]; then
+		Xdialog --wrap --buttons-style text --title "$title" $roche_cui \
+				--no-buttons --infobox "$1" $BOX_HEIGHT $BOX_WIDTH $(( $3 * 1000 )) 2> /dev/null
+	elif [ "$2" = "msg_wiz" ]; then
+		Xdialog --wrap --buttons-style text --wizard --title "$title" $roche_cui \
+			    --wizard --yesno "$1" $BOX_HEIGHT $BOX_WIDTH $(( $3 * 1000 )) 2> /dev/null
+	elif [ "$2" = "msg_proceed_can" ]; then
+		Xdialog --wrap --buttons-style text --default-no --ok-label Proceed --cancel-label Cancel \
+				--title "$title" $roche_cui \
+				--yesno "$1\n\nPress \"Proceed\" to continue anyway,\nor \"Cancel\" to quit." \
+				$BOX_HEIGHT $BOX_WIDTH $(( $3 * 1000 )) 2> /dev/null
+	elif [ "$2" = "msg_wrap" ]; then
+		Xdialog --wrap --buttons-style text --title "$title" $roche_cui --fill --msgbox "$1" \
+				$BOX_HEIGHT $BOX_WIDTH $(( $3 * 1000 )) 2> /dev/null
+	else
+		Xdialog --wrap --buttons-style text --title "$title" $roche_cui --msgbox "$1" \
+				$BOX_HEIGHT $BOX_WIDTH $(( $3 * 1000 )) 2> /dev/null
+	fi
+	return $?
+}
+
+
+# --------------------------------------------------------- #
+# inputXwindows ()                                          #
+# Asks for a text input.                                    #
+# --------------------------------------------------------- #
+inputXwindows ()
+{
+	Xdialog --wrap --title "$title" $roche_cui --buttons-style text --stdout --inputbox "$1" 10 45 "$2"  2> /dev/null
+}
+
+# --------------------------------------------------------- #
+# progressXwindows ()                                       #
+# Prints percentages to a Xdialog gauge.                    #
+# --------------------------------------------------------- #
+progressXwindows ()
+{
+    awk -- '/^[0-9]+/ { print; f=1; } { if(!f) { print "XXX\n"$0"\nXXX"; } f=0; fflush(); }' | Xdialog --buttons-style text $roche_cui --title "Support Tool" --gauge "Progress" 8 45
+}
+
+# --------------------------------------------------------- #
+# passwordXwindows ()                                       #
+# ----------------------------------------------------------#
+passwordXwindows ()
+{
+	Xdialog --title "$title" $roche_cui --buttons-style text --password --stdout --inputbox "$1" 8 45 2> /dev/null
+}
+
+# --------------------------------------------------------- #
+# addListXwindows ()                                        #
+# ----------------------------------------------------------#
+addListXwindows ()
+{
+	if [ ${#list_items} -eq 0 ]; then
+		list_values="1 \"$2\" $list_selected"
+		list_items="$1"
+		list_selected="off"
+	else
+		list_items=$list_items"|$1"
+		num_items=`echo $list_items |awk 'BEGIN {FS="|";} END{print NF}' -`
+		if [ ${#3} -eq 0 ]; then
+			list_values="$list_values $num_items \"$2\" $list_selected"
+			list_selected="off"
+		else
+			list_values="$list_values $num_items \"$2\" $3"
+		fi
+	fi
+	
+}
+
+# --------------------------------------------------------- #
+# progressJava ()                                           #
+# Prints clean percentages for JAVA applications.           #
+# --------------------------------------------------------- #
+progressJava ()
+{
+    awk -- '/^[0-9]+/ { print; }'
+}
+
+# --------------------------------------------------------- #
+# progressJava ()                                           #
+# Prints clean percentages for JAVA applications.           #
+# --------------------------------------------------------- #
+messageJava ()
+{
+	if [[ "$2" = "msg" ]]; then
+          echo $1
+	fi
+}
+
+
+# --------------------------------------------------------- #
+# doList ()                                                 #
+# displays a list created by addListXXXX                    #
+# ----------------------------------------------------------# 
+doList ()
+{
+   local dialog_result
+   local dialog_retVal
+   if [ $interface = "xwindows" ]; then
+      menu_cmd="Xdialog $roche_cui --wizard --title=\"$title\"\
+                --buttons-style text -stdout --no-tags --radiolist \"$2\" 28 68 4 $list_values"
+      theChoice=`sh -c "$menu_cmd"  2> /dev/null`
+      dialog_retVal=$?
+      if [ ${#theChoice} -gt 0 ]; then
+      	eval "$1=`echo $list_items | cut -f $theChoice -d '|'`"
+      else
+      	eval "$1=''"
+      fi
+
+      return $dialog_retVal 
+   else
+      OLD_IFS=${IFS}
+      IFS="|"
+      echo $2
+      index=1
+      for aChoice in $list_values; do
+        echo $index ") " $aChoice
+        let index=index+1
+      done
+      echo "0 ) exit"
+      while [ 1 ]; do
+         read -p "Choice? " theChoice
+    	 case $theChoice in
+          0)
+               dialog_ret=1
+               break
+    	       ;;
+          [1-9]*)
+            if [ $theChoice -lt $index ]; then
+               eval "$1=`echo $list_items | cut -f $theChoice`"
+               dialog_ret=0
+               break
+            fi
+            ;;               
+         esac
+       done
+       IFS=$OLD_IFS
+       return $dialog_ret
+   fi
+}
+
+# --------------------------------------------------------- #
+# checkForDataDirNeed ()                                    #
+# Checks for the existance of the                    	    #
+# --------------------------------------------------------- #
+checkForDataDirNeed ()
+{
+   if [ -e "$1" -a -r "$1" ]; then 
+    echo $(grep -c "PROMPT_FOR_DATADIR=1" "$1")
+    return
+   fi
+   echo 0
+}
+
+# --------------------------------------------------------- #
+# parseArgs ()                                              #
+# Parses the arguments from the command line.               #
+# Returns: 0 if all information is required to start the    #
+#  collection.  Otherwise, the script should start the	    #
+#  X interface to gather more data.                         #
+# --------------------------------------------------------- #
+parseArgs ()
+{
+	local ret_val=1
+        local user_specd_ftp_login=0
+        local user_specd_mail_login=0
+	
+	TEMP=`getopt -o Vs:c:hnm:u:f::l:o:jqtbpe:: -l version,help,ftp::,output:,mailto::,email::,quiet,plain -n "supportTool" -- "$@"`
+        
+        if [ $? != 0 ]; then
+            printHelp
+            exit 1
+        fi
+
+        eval set -- "$TEMP"
+
+	while [ true ]; do
+	   case $1 in
+		-V|--version)
+			echo "gsSupportTool $version_major.$version_minor ($build_number)"
+			echo "(c) 454 Life Sciences 2007-2014. All rights reserved."
+			exit 0	
+			;;
+		-c)
+			config_file_name=$2
+			shift
+			;;
+		-s)
+			# The -s option is deprecated.
+			shift
+			;;	
+		-n)
+			no_internet=1
+                        ;;
+	     	-h|-\?|--help)
+			printHelp
+			exit 0
+	        	;;
+		
+		# Transports 		
+		-f|--ftp)
+			transport="ftp"
+			if [[ ${#2} -gt 0 ]]; then
+				if [ ${2:0:6} == "ftp://" ]; then
+				   ftp_site=$2
+				elif [ ${2:0:5} == "tp://" ]; then
+				   ftp_site=f$2					
+				else
+  			           ftp_site=ftp://$2
+				fi
+			        if [ $user_specd_ftp_login -ne 1 ]; then
+			           ftp_login=
+			        fi
+			fi
+			shift	
+
+			;;
+#		-e|--email|--mailto)
+#			transport="email"
+#			if [[ -n $2 ]]; then
+#				destination_email=$2
+#			fi
+#			shift	
+#
+#			;;
+		-l)
+			ftp_login=$2
+			user_specd_ftp_login=1
+			shift
+			;;
+		-o|--output)
+		
+			transport=`readlink -f $2`
+			shift
+			;;
+
+
+		# Run mode
+		-q|--quiet)
+			interface="silent"
+			;;
+		-t) 	
+			# Terminal interactive
+			interface="terminal"
+			;;
+		-p|--plain) 
+			enable_encryption=0
+			;;
+		# Mail server settings
+#		-m)   
+#			mail_server=$2
+#			if [ "$user_specd_mail_login" -ne 1 ]; then
+#			   mail_server_acct=
+#			   mail_server_password=
+#			fi
+#			shift
+#			;;
+#		-u) 
+#			
+#			mail_server_acct=`expr match "$2" '\([^:]*\)'`
+#			mail_server_password=`expr match "$2" '.*:\(.*\)'`
+#			user_specd_mail_login=1
+#			shift
+#			;;
+	     	*)
+			shift
+			break
+	        	;;
+		esac 
+		shift
+
+	done 
+	
+	if [ $# -gt 0 ]; then
+		DATADIR=$1
+
+		if [ ! -d $DATADIR ]; then
+			DATADIR="`dirname $DATADIR`"
+			for anArg in $*; do
+
+				extension=${anArg##*.} 
+				if [ "$extension" = "cwf" ]; then
+					DATADIR="`dirname $anArg`"
+					ANOTHER_CWF="`basename $anArg`"
+					CWF_FILE=("${CWF_FILE[@]}" $ANOTHER_CWF)
+				else 
+					# Not a cwf file.  Clear the DATADIR so users can choose a 
+					# correct file.
+					DATADIR=""
+				fi
+			done
+		fi
+	fi
+}
+
+# --------------------------------------------------------- #
+# encrpytFile ()                                            #
+#  Encrypts a file pointed to by the outfile variable       #
+#  Updates the outfile variable to reflect the new file name#
+# --------------------------------------------------------- #
+encryptFile ()
+{
+	if [ $putCopy -eq 1 ]; then
+	   cp $outFile $HOME
+	fi
+	if type gpg > /dev/null 2>&1 ; then
+	    echo "Encrypting report" >&3
+		{
+     		echo "Key-Type: DSA"
+			echo "Key-Length: 256"
+			echo "Name-Real:"
+			echo "Name-Comment:"
+			echo "Name-Email:"
+			echo "Expire-Date: 0"
+			echo "%commit"
+		} | gpg --homedir $WORKDIR --gen-key --batch --no-tty 
+		gpg --homedir $WORKDIR --import $GPG_PUBLIC_KEY
+ 	    pv -n $outFile | gpg --homedir $WORKDIR --always-trust\
+	       -z0 -e -r "Roche Service" --set-filename=$outFile 2>/dev/null > $outFile.pgp
+
+	    if [ $? -eq 0 ]; then
+	      rm -f $outFile
+	      outFile=$outFile.pgp
+ 	    fi 
+	fi
+}
+
+# --------------------------------------------------------- #
+# findServer ()                                             #
+# Attempts to look up the mail server for a given e-mail    #
+# address.					            #
+# ----------------------------------------------------------#
+findServer ()
+{
+	mail_domain=`echo $1 | cut -f2 -d@` 
+        if type dig > /dev/null 2>&1 ; then
+        	dig +noall +answer MX $mail_domain | sort -g | head -1 | cut -f6 | cut -f2 -d" "
+	elif type host > /dev/null 2>&1 ; then
+		host -t MX $mail_domail | sort -g | head -1 | cut -f7 -d" "
+	fi
+}
+
+
+
+# --------------------------------------------------------- #
+# termTidyExit ()
+# Exit the program if it was killed with INT or TERM        # 
+# --------------------------------------------------------- #
+termTidyExit ()
+{
+   stty echo
+   if [ -e "$finalMessage" ]; then
+	   rm -f $finalMessage
+   fi
+   tidyExit
+}
+
+# --------------------------------------------------------- #
+# tidyExit ()                                               #
+
+# ----------------------------------------------------------#
+tidyExit ()
+{
+    
+
+   if [ $enable_tidy -a -e "$WORKDIR" -a -d "$WORKDIR" ]; then
+    rm -rf $WORKDIR
+   fi
+ 
+   exit
+}
+
+# --------------------------------------------------------- #
+# locateConfigFile ()                                       #
+# Locates the config file	                            #
+# --------------------------------------------------------- #
+locateConfigFile ()
+{
+	
+	if [ -e "$1" -a -r "$1" ]; then
+		echo $(readlink -f $1)
+		return
+	fi
+
+	my_real_dir=$(dirname $(readlink -f $0))
+	trial_filename="$(dirname $my_real_dir)/share/gsSupportTool/$1"
+
+	if [ -e "$trial_filename" -a -r "$trial_filename" ]; then
+		echo $trial_filename
+		return
+	fi
+
+	trial_filename="$(dirname $my_real_dir)/share/$1"
+	if [ -e "$trial_filename" -a -r "$trial_filename" ]; then
+		echo $trial_filename
+		return
+	fi
+
+	echo ""
+
+}
+
+# --------------------------------------------------------- #
+# runWizard ()                                              #
+# Runs a  'wizard' to collect the required                  #
+#  information to start a run.                              #
+# --------------------------------------------------------- #
+runWizard ()
+{
+	local step=1
+	local dialog_ret=0 
+	local user_selected_datadir=0
+
+	# Setup local values
+	L_config_file_name="$config_file_name"
+
+	if [ ! -z "$DATADIR" ];then
+		L_DATADIR="$DATADIR"
+	else
+		L_DATADIR="$default_data_dir"
+	fi
+
+
+
+
+	while [ 1 ]; do
+		case $step in
+		1)
+			#Intro message
+			MESSAGE="The SupportTool is a utility used to help in the\ndiagnosis of potential sequencing run issues or\ninstrument problems for the GS FLX and Junior systems. This\nprogram will process and collect a comprehensive set\nof information for transmittal to Roche for further investigation.\n\nIMPORTANT: Please notify your local\nRoche service representative before reporting\nan issue via this utility.\n"
+
+			$info_method "$MESSAGE" msg 5 0
+			dialog_ret=$?
+			let step=step+1
+			;;
+		2) 
+			if [ -n "$DATADIR" ]; then
+				L_config_file_name=$(locateConfigFile runSupport.cfg)
+				let step=step+1
+			else
+				if [ -z "$config_file_name" ]; then
+					list_values=
+					list_items= 
+					config_files_dir="$(dirname $(locateConfigFile runSupport.cfg))"
+
+					for cfg_file in $(find $config_files_dir -iname '*Support.cfg'); do
+						TEST_EXPR=$(grep \#CAN_RUN_EXPR $cfg_file | cut -c 15-)
+						if [ -n "$TEST_EXPR" ]; then
+							if eval $TEST_EXPR; then
+							$addlist_method $cfg_file "$(grep \#USER_PROMPT $cfg_file | cut -c 14-)"
+							fi
+						else
+							$addlist_method $cfg_file "$(grep \#USER_PROMPT $cfg_file | cut -c 14-)"
+						fi
+					done 
+					doList L_config_file_name "What seems to be the problem?"
+					dialog_ret=$?
+
+					if [ $dialog_ret -eq 0 ]; then
+						let step=step+1
+					fi
+				else 
+					L_config_file_name=$(locateConfigFile $config_file_name)
+					let step=step+1
+				fi
+			fi
+			;;
+		3) 
+
+			# Be nice to the user. The current directory should be a D_ or R_ or contain D_'s or R_'s or be $HOME.
+			# This needs to be done after we locate the source files.
+			
+
+			CURRENT_DIRECTORY=`pwd`
+			CURRENT_DIR_BASE=`basename $CURRENT_DIRECTORY`
+			if [ "${CURRENT_DIR_BASE:0:2}" == "R_" -o \
+				 "${CURRENT_DIR_BASE:0:2}" == "D_" -o \
+				 "`basename $CURRENT_DIRECTORY`" == "regions" -o \
+				 `ls $CURRENT_DIRECTORY | grep -c "^R_"` -gt 0 -o \
+				 `ls $CURRENT_DIRECTORY | grep -c "^D_"` -gt 0 ]; then
+				echo "Current directory: `pwd`" >> $LOGFILE
+			else
+				cd $HOME
+				echo "Current directory (changed to): `pwd`" >> $LOGFILE
+			fi
+
+
+			# Check the source data, if necessary
+			need_data_dir=$(checkForDataDirNeed $L_config_file_name)
+			if [  $need_data_dir -eq 1 -a -z "$DATADIR"  ]; then
+				if [ $interface = "xwindows" ]; then
+				
+
+				L_DATADIR=`Xdialog  $roche_cui \
+				--buttons-style text --wizard --backtitle "Open the directory containing the problem run, then click NEXT."\
+				--title "$title" --no-buttons -stdout --dselect "$L_DATADIR" 50 100 2>/dev/null`
+				dialog_ret=$?	
+				else
+					if [ ${#RIGDATA} -gt 0 ]; then
+						echo "Press ENTER for a list or type the full path for problem run:"
+						read -ep "path: " L_DATADIR
+						if [ -z "$L_DATADIR" ]; then 
+							echo "Finding runs in $RIGDATA.  Please wait..."
+							RUNS=`find $RIGDATA \( -iname analysisParms.parse -o -iname gsRunProcessor.log \) -exec dirname {} \;|sort`
+							PS3="Select run by number: "
+							select L_DATADIR in $RUNS; do
+							break
+							done 
+							PS3="#? " 
+						fi
+					else
+						# Text mode warning for E_ file collection
+                       	         		if [ "$config_file_name" = "runSupport.cfg.assay" ]; then
+							echo
+							echo "*** Generating a run report containing E_ folder contents will take approximately 20-30 min. ***"
+							echo
+							echo "*** Selecting the ftp transport option can take an additional 30 min or more. ***"
+                                		fi
+						echo
+						echo "Type the full path for problem run:"
+						read -ep "path: " L_DATADIR
+					fi
+					dialog_ret=0
+				fi
+				if [ $dialog_ret -eq 0 ]; then
+					OTHER_ANALYSIS=`find $L_DATADIR -mindepth 2 -maxdepth 2 \( -iname analysisParms.parse -o -iname gsRunProcessor.log \) -printf '%h\n'`
+					if [ -n "$OTHER_ANALYSIS" ]; then
+						list_values=
+						list_items= 
+						for d_dir in `find $L_DATADIR -mindepth 2 -maxdepth 2 \( -iname analysisParms.parse -o -iname gsRunProcessor.log \) -printf '%h\n'`; do
+							$addlist_method $d_dir `basename $d_dir`
+						done 
+
+						$addlist_method $L_DATADIR "No, just include the raw data"
+						doList L_DATADIR "Would you like to include an analysis in your report?"
+						dialog_ret=$?
+						if [ $dialog_ret -eq 3 ]; then
+							dialog_ret=4  # The user doesn't want to go back, not really.
+						fi	
+					else 
+						# Check to see if $L_DATADIR indeed looks like an R_ or D_ directory.
+						if [ ! -e $L_DATADIR/dataRunParams.parse -a ! -e $L_DATADIR/gsRunProcessor.log -a ! -e $L_DATADIR/analysisParmsParse.log ]; then
+							# Not happy - .  Check with the user to see if they really mean it.
+							$info_method "$L_DATADIR does not seem\nto be a run or analysis directory.\n\n\
+										 Ensure you have DOUBLE CLICKED the directory to select it.\n\n\
+									     Press 'Previous' to select a new directory (recommended),\n\
+										  'Next' to choose this directory anyway.\n'Cancel' quits the program." msg_wiz 0 0
+							dialog_ret=$?
+							if [ $dialog_ret -eq 3 ]; then
+								dialog_ret=4  # The user doesn't want to go back, not really.
+							fi
+						fi
+					fi
+				fi
+			fi
+
+			if [ $dialog_ret -eq 0 ]; then
+				if [ $need_data_dir -eq 0 ]; then 
+					let step=step+1
+					# Check to see if the data directory exists and can be read from.
+				elif [[ -e $L_DATADIR && -d $L_DATADIR && -r $L_DATADIR ]]; then
+					let step=step+1 
+				else
+					$info_method "Cannot read from directory \"$L_DATADIR.\"\n\nPlease select another." msg_wrap 5 0
+					L_DATADIR=$default_data_dir
+					DATADIR=
+				fi
+			fi
+			;;
+		4)
+			# Now, get the output 
+
+			if [ -z "$transport" ]; then 	
+				# If no transport is specified, then we have to get the list.  
+				# Try each one in turn.
+				list_values=
+				list_items= 
+
+				if [ $no_internet -ne 1 ]; then
+									
+					# First, try FTP
+					$info_method "Checking Internet connectivity.\n\nPlease wait." info 1 0
+					if type curl >/dev/null 2>&1; then
+						if [ ${#ftp_login} -gt 0 ]; then
+							ftp_password=`expr match "$ftp_login" '.*:\(.*\)'`
+							if [ ${#ftp_password} -eq 0 ]; then
+								# Prompt for ftp password here
+								ftp_password=`$password_method "Enter password for $ftp_login at $ftp_site"` 
+								echo
+								if [ $? -ne 0 ]; then
+									exit 1
+								fi
+								ftp_login="$ftp_login:$ftp_password"
+							fi
+							ftp_arg="-u $ftp_login"
+						fi	
+						curl -s $ftp_arg --disable-epsv --connect-timeout 10 $ftp_site >/dev/null 2>&1
+						if [ $? -eq 0 ]; then
+							$addlist_method ftp "Send directly to $ftp_site"	
+							ftp_available=1
+						fi
+					fi
+
+					# Next, try e-mail
+					#if type msmtp >/dev/null 2>&1 ; then			  
+					#	if [ -z "$mail_server" ]; then 
+							# Mail server was not specified
+					#		l_mail_server=`findServer $destination_email`
+					#
+					#		if [ -n "$l_mail_server" ]; then
+					#			msmtp --timeout=10 --host=$l_mail_server --serverinfo >/dev/null 2>&1
+					#			if [ $? -eq 0 ]; then
+					#				$addlist_method email "Email to $destination_email"
+					#			else
+					#				l_mail_server=""
+					#			fi
+					#		fi
+					#	else
+							# A mail server WAS specified.				
+					#		$addlist_method email "Email to $destination_email"	   
+					#	fi
+					#fi
+					
+				fi 
+				found=0
+				if [ -d "/media" ]; then 
+					for a_mount in `ls /media`; do 
+						if [ -w "/media/$a_mount" -a $(mount | grep -c /media/$a_mount) -ne 0 ]; then
+							$addlist_method "/media/$a_mount" "Removable Media ($a_mount)"
+							found=1
+						fi
+					done
+				fi
+				if [ $found -eq 0 ]; then
+					$addlist_method "usb" "Removable USB Media" "unavailable"
+				fi
+
+				if [[ ${#RIGDATA} -gt 0 && -e $RIGDATA ]]; then
+					$addlist_method $RIGDATA "Data directory ($RIGDATA)"
+				fi
+
+				$addlist_method filesystem "Other directory"
+				doList l_transport "Select a destination for the support data"
+				dialog_ret=$?	
+			else
+				l_transport=$transport 
+			fi
+
+			if [ $dialog_ret -eq 0 ]; then 
+				let step=step+1  
+			fi
+			;;
+		5) 
+			# Final questions.  Either prompt for a an FTP or email password, or a directory
+			if [ $dialog_ret -eq 3 ]; then 
+				dialog_ret=0
+				let step=step-2   #Back
+			elif [[ "$l_transport" = "email" && -n "$mail_server_acct" ]]; then
+				if [ -z "$mail_server_password" ]; then
+					mail_server_password=`$password_method "Enter password for mail server \"$mail_server\""`
+					if [ $? -ne 0 ]; then
+						exit 1
+					fi
+					dialog_ret=0
+					echo
+				fi
+			elif [[ "$l_transport" = "ftp" && -n "$ftp_login" ]]; then
+				if [ `expr index : $ftp_login` -eq 0 ]; then
+					# no ftp password specified
+					ftp_password=`$password_method "Enter password for $ftp_login at $ftp_site"`
+					if [ $? -ne 0 ]; then
+						exit 1
+					fi
+					if [ -n $ftp_password ]; then
+						ftp_login=$ftp_login":$ftp_password"
+					fi
+					dialog_ret=0
+					echo
+				fi
+				dialog_ret=0
+			elif [[ "$l_transport" = "filesystem" ]]; then
+				while [ 1 ]; do
+					if [ $interface = "xwindows" ]; then
+						l_transport=`Xdialog $roche_cui --wizard --backtitle "Where do you want the file saved?"\
+						--title "$title" --buttons-style text --stdout --dselect "$out_dir" 50 100 2>/dev/null`
+						dialog_ret=$?
+					else
+						read -ep "Where do you want the file saved? " l_transport
+						dialog_ret=0
+					fi
+
+					if [ $dialog_ret -eq 0 ]; then
+						transport_try=`eval readlink -f $l_transport`	
+						if [[ ! -d $transport_try ]]; then
+							$info_method "The output location \"$l_transport\" does not exist." msg 0 0
+						elif [[ ! -w $transport_try ]]; then
+							$info_method "The output location \"$l_transport\" cannot be written to." msg 0 0
+						else
+							l_transport=$transport_try
+						break
+						fi
+					else 	
+						break
+					fi
+				done
+			fi
+			if [ $dialog_ret -eq 0 ]; then
+				let step=step+1
+			fi
+			;;
+		6) 
+			if [[ "$l_transport" = "email" || "$l_transport" = "ftp" || "$l_transport" = "cdrecorder" ]]; then
+				if [ $interface = "xwindows" ]; then
+				putCopy=`Xdialog  $roche_cui \
+				 --buttons-style text --wizard \
+				 --stdout --wrap --title "$title" --check "Put an unencrypted report in $HOME" "on"\
+				--yesno "The support tool automatically encrypts the report when sending the data across the internet.  This makes it impossible for the user to examine it's contents." 15 55 2>/dev/null`
+				dialog_ret=$?
+				if [[ $dialog_ret -eq 0 && "$putCopy" = "checked" ]]; then
+					putCopy=1
+				else
+					putCopy=0
+				fi
+
+				else
+				echo
+				echo "The support tool automatically encrypts the"
+				echo "  report when sending the data across the internet."
+				echo "  This makes it impossible for the user to examine"
+				echo "  it's contents."
+				echo 
+				read -ep "Would you like an unencrypted copy of the report stored in your home directory? [Y/n] " putCopy
+				if [[ ${#putCopy} -eq 0 || ${putCopy:0:1}  = "y" ||  ${putCopy:0:1}  = "Y" ]]; then
+					putCopy=1
+				else
+					putCopy=0
+				fi
+
+				dialog_ret=0
+				fi
+			fi
+			if [ $dialog_ret -eq 0 ]; then
+				let step=step+1
+			fi
+
+			;;
+		*)
+			# Copy local variables to "real" variables
+			config_file_name=$L_config_file_name
+			DATADIR=$L_DATADIR
+			transport=$l_transport
+			mail_server=$l_mail_server
+
+			return
+			;;
+		esac
+
+		if [ $dialog_ret -eq 1 ]; then 
+			exit 1		  #Cancel
+		elif [ $dialog_ret -eq 3 ]; then 
+			let step=step-1   #Back
+		elif [ $dialog_ret -eq 255 ]; then 
+			exit 1
+		fi
+
+
+
+	done
+	
+}
+
+grabFiles()
+{	
+	for aFile in $*; do
+		if [ ! -e "$aFile" ]; then	
+			echo "$aFile does not exist." >&2
+			continue
+		fi
+		if [ -d "$aFile" ]; then
+			continue
+		fi
+		file="`basename $aFile`"
+		dir="`dirname $aFile`"
+		dir="$WORKDIR/$dir"
+		mkdir -p "$dir"
+		if [ ${aFile:0:1} = "/" ]; then
+			#Absolute file
+			ln -sf "$aFile" "$dir/$file"
+	    else
+			#Relative file
+			ln -sf $(pwd)/"$aFile" "$dir/$file"
+		fi
+	done
+}
+
+### Pushd that's quiet about what it's doing
+qpushd()
+{
+	pushd "$1"  > /dev/null 2>&1
+}
+
+### popd that's quiet about what it's doing
+qpopd()
+{
+	popd > /dev/null 2>&1
+}
+
+# --------------------------------------------------------- #
+#                                                           #
+# MAIN ROUTINE STARTS HERE                                  #
+#                                                           #
+# --------------------------------------------------------- #
+GPG_PUBLIC_KEY=$(locateConfigFile GPG-PUBLIC-KEY)
+
+# Set the executable path.
+my_real_dir=$(dirname $(readlink -f $0))
+
+if [ -e "$(dirname $my_real_dir)/libexec/gsSupportTool/7za" ]; then
+   PATH="$(dirname $my_real_dir)/libexec/gsSupportTool:$PATH"
+elif [ -e "$(dirname $my_real_dir)/libexec/7za" ]; then
+   PATH="$(dirname $my_real_dir)/libexec:$PATH"
+fi
+
+#
+# See if we are running under X and make an initial interface guess
+#
+if [ -n "$DISPLAY" ]; then
+	if type Xdialog >/dev/null 2>&1 ; then
+		interface="xwindows"
+	fi
+fi	 
+
+#
+# See if the user has specified a mail relay server
+#
+if [ -r $support_tool_settings ]; then
+    mail_server=`grep '^MAIL_RELAY[[:blank:]]*=' $support_tool_settings | cut -f2 -d'='`
+    if [ -n $mail_server ]; then
+
+    mail_server_acct=`grep '^USER[[:blank:]]*=' $support_tool_settings | cut -f2 -d'='`
+    mail_server_password=`grep '^PASSWORD[[:blank:]]*=' $support_tool_settings | cut -f2 -d'='`
+    fi
+fi
+
+
+#
+# Pass all the arguments to the parseArgs script
+#
+parseArgs $*
+
+
+#
+# Sets up the i/o helper functions
+#
+case $interface in
+	"silent")
+		info_method="messageSilent"
+		gauge_method="progressSilent"
+		password_method="passwordSilent"
+		input_method="passwordSilent"
+		;;
+	"terminal") 
+		info_method="messageTerminal"
+		gauge_method="progressTerminal"
+		password_method="passwordTerminal"
+		addlist_method="addListTerminal"
+		input_method="inputTerminal"
+		;;
+	"xwindows")
+               info_method="messageXwindows"
+		gauge_method="progressXwindows"
+		password_method="passwordXwindows"
+		addlist_method="addListXwindows"
+		input_method="inputXwindows"
+		;;		
+	"java")	
+		info_method="messageJava"
+		gauge_method="progressJava"
+		password_method="passwordSilent"
+		;;
+esac
+
+
+
+trap termTidyExit INT TERM
+trap tidyExit EXIT
+
+WORKDIR=`mktemp -d /tmp/supportTool.XXXXXX`
+
+if [ -z "$WORKDIR" -o ! -e $WORKDIR ]; then
+ 	$info_method "Error: Could not create a working directory in /tmp." msg 0 0
+	exit 1
+fi
+
+LOGFILE=$WORKDIR/gsSupportTool.log
+
+echo -e "\n\ngsSupportTool v$version_major.$version_minor ($build_number)\n\n" >> $LOGFILE
+echo "Hostname: `hostname`" >> $LOGFILE
+echo "Started at: `date`" >> $LOGFILE
+echo "Current User: " `whoami` >> $LOGFILE
+echo "gsSupportTool command: " `readlink -f $0` >> $LOGFILE
+echo "PATH: $PATH" >> $LOGFILE
+echo "DATADIR: " $DATADIR >> $LOGFILE
+echo "CWF_FILE: " ${CWF_FILE[*]} >> $LOGFILE
+echo >> $LOGFILE
+echo "OS Distribution information" >> $LOGFILE
+echo "--------------------------------" >> $LOGFILE
+for aFile in /etc/*_ver* /etc/*-rel*; do
+	if [ -e "$aFile" -a ! -d "$aFile" ]; then
+		echo $aFile: `cat $aFile` >> $LOGFILE
+	fi
+done
+echo "--------------------------------" >> $LOGFILE
+echo >> $LOGFILE
+
+
+#
+# We need a destination and perhaps a data source ("Run").  If we 
+# don't have what we need, run in interactive mode and collect
+# that info from the user or die if the batch mode is set.
+#
+if [ -z "$transport" -o -z "$config_file_name" ]; then
+	runWizard
+   elif [[ $need_data_dir -eq 1 && -z $DATADIR ]]; then
+	runWizard
+   else 
+      # The user specified everything on the command line. 
+      # Just drop into non-interactive mode.
+      info_method="messageTerminal"
+      gauge_method="progressTerminal"
+      password_method="passwordTerminal"
+      echo "Roche/454 Support Tool v$version_major.$version_minor starting in non-interactive mode."
+	  echo "Using batch mode." >> $LOGFILE
+fi 
+
+#
+# Canonicalize and verify the data directory
+#
+if [ $need_data_dir -eq 1 ]; then
+  DATADIR=`readlink -f $DATADIR`
+
+  # Verify the parameters
+  if [[ ! -d $DATADIR || ! -r $DATADIR ]]; then
+	echo -e "The specified data directory $DATADIR does not exist.\nEXITING." >> $LOGFILE
+		
+	$info_method "The specified data directory does not exist." msg 0 0
+
+	exit 1
+  fi
+fi
+
+
+echo "Destination: $transport" >> $LOGFILE
+
+
+if [[ ${transport:0:1} = "/" && ( ! -d $transport || ! -w $transport ) ]]; then
+	echo -e "Could not write to the output directory ($transport).\nEXITING." >> $LOGFILE
+	$info_method "Error: Could not write to the output directory ($transport)." msg 0 0
+	exit 1
+fi
+
+
+#The final message is put into a file.
+finalMessage=$WORKDIR/finalMessage.txt
+
+#
+# Okay, DO IT!
+#
+case $transport in 
+	ftp)
+		$info_method "Making report.  The program will automatically send the package when the process is complete." info 5 0
+		;;
+	email)
+		$info_method "Making report.  The program will automatically send the package when the process is complete." info 5 0
+		;;
+	*)
+		$info_method "Making report.  Please wait." info 1 0
+		;;
+esac 
+
+
+# Save the old file descriptors for later
+exec 4>&1
+exec 5>&2
+
+# Push stdout and error to the logfile
+exec 1>>$LOGFILE      
+exec 2>&1
+
+# Setup the progress bar as a coprocess
+
+exec 3> >($gauge_method "Gathering Files" "Gathering Files")
+{
+
+	# Call the user script
+	export DATADIR
+	export WORKDIR
+	export LOGFILE
+
+	echo -e "\n------------------------------------------------------------------------------------------------"
+	echo -e "--- Running: $config_file_name" 
+	echo -e "------------------------------------------------------------------------------------------------\n"
+
+	. $config_file_name
+
+	echo -e "\n------------------------------------------------------------------------------------------------"
+	echo -e "--- Done"
+	echo -e "------------------------------------------------------------------------------------------------\n" 
+
+	this_file=1
+	tar_size=0
+
+	#
+	# Do the compression
+	#
+	echo "Compressing." >&3
+	echo 10 >&3
+
+	if [ $transport = "ftp" -o $transport = "email" ]; then
+		outFile="/tmp/$FILENAME_FORMAT.7z"
+	else
+		outFile="$transport/$FILENAME_FORMAT.7z"
+	fi
+
+	qpushd $WORKDIR	
+		echo "*This log file will be truncated during the compression.*"
+		echo -n "    Compressing to $outFile..."
+		num_infiles=`find $WORKDIR | wc -w`
+		7za a -l -ms=on $outFile . | awk -- "BEGIN { a=1;} /Compressing/ { print int(a*90/$num_infiles); a=a+1; fflush();}" >&3
+		echo "100" >&3
+		echo "done."
+	qpopd
+
+	#
+	# Send the file
+	#
+	case $transport in 
+	ftp)
+		if [ $enable_encryption -eq 1 ]; then
+			encryptFile
+		fi 
+
+		echo "Sending to Manufacturer Via FTP" >&3
+		echo 0 >&3
+		if [ -n "$ftp_login" ]; then
+			ftp_arg="-u $ftp_login"
+		fi
+		pv -n $outFile | curl -s $ftp_arg -T - --disable-epsv $ftp_site/`basename $outFile`
+		ret_val=$?
+		if [ $ret_val -eq 0 ]; then
+			echo "Report successfully sent." > $finalMessage
+			if [ $putCopy -eq 1 ]; then
+				echo "Also, a copy has been placed in $HOME." >> $finalMessage 
+			fi
+			rm $outFile
+		else
+			echo "Error sending file via ftp. The report is at: $outFile" > $finalMessage
+			enable_tidy=0
+		fi
+
+	;;
+	email)
+		tmpls=`mktemp /tmp/tmp.XXXXXX`
+		7za l $outFile > $tmpls
+
+		if [ $enable_encryption -eq 1 ]; then
+			encryptFile
+		fi
+
+		echo "Sending via e-mail" >&3
+
+		mkdir $WORKDIR/split
+      
+      if [ `stat -c %s $outFile` -gt 10240000 ]; then
+         # Split the file
+         echo "Splitting file for transport" >&3
+         shortName=`basename $outFile`
+         pv -n $outFile | split -b 10240000 - $WORKDIR/split/$shortName.
+      else
+         mv $outFile $WORKDIR/split
+      fi
+      
+		while [ ! $mail_success ]; do
+
+			tmpconfig=$WORKDIR/mailconfig
+			if [ -z "$mail_server" ]; then
+				mail_server=`findServer $destination_email`
+			fi
+
+			echo "defaults" >$tmpconfig
+			echo "account default" >>$tmpconfig
+			echo "timeout 5" >>$tmpconfig
+			echo "domain 454.com" >>$tmpconfig
+			echo "host $mail_server" >>$tmpconfig
+			echo "from `whoami`@454.com" >>$tmpconfig
+			if [ -n "$mail_server_acct" ]; then
+				echo "auth login" >>$tmpconfig
+				echo "user $mail_server_acct" >>$tmpconfig
+				echo "password $mail_server_password" >>$tmpconfig
+			fi
+			chmod 600 $tmpconfig
+
+			out_files=`find $WORKDIR/split/ ! -type d | sort`
+			num_files=`echo $out_files | wc -w`
+			current_file=1	
+
+
+			for aFile in $out_files; do
+				echo "Sending mail $current_file of $num_files" >&3
+				echo 0 >&3
+				{
+					echo "To: 454 Service <$destination_email>"
+					echo "From: Rig (`hostname -s`) <`hostname -s`@454.com>"
+					echo "Date: `date`"
+					echo "Mime-version: 1.0"
+					echo "Subject: Report: `basename $aFile` ( $current_file/$num_files )"
+					echo "Content-type: multipart/mixed; boundary=\"frontier\""
+
+					echo "This is a multi-part message in MIME format."
+					echo "--frontier"
+					echo "Content-Type: text/plain; charset=UTF-8"
+					echo "Content-Transfer-Encoding: 8bit"
+					echo
+					if [ -e $support_tool_settings ]; then
+						grep ORGANIZATION $support_tool_settings
+						echo
+					fi 
+					echo "Generated by Roche/454 Support Tool v$version_major.$version_minor"
+					echo 
+					echo $aFile
+					echo 
+					echo "--frontier"
+					echo "Content-Type: application/octet-stream"
+					echo "Content-Disposition: attachment; filename=\"`basename $aFile`\""
+					echo "Content-Transfer-Encoding: base64"
+					echo
+
+					pv -n $aFile 2>&3 | base64 
+					echo "--frontier--"
+				} | msmtp -d -C $tmpconfig -t
+
+				ret_val=$?
+				if [ $ret_val -eq 77 ]; then
+					rm -f $tmpls
+					rm -f $tmpconfig 
+					echo "Could not authenicate with mail server \"$mail_server\"." > $finalMessage
+					mail_success=1
+				elif [ $ret_val -ne 0 ]; then
+					rm -f $tmpls
+					rm -f $tmpconfig 
+					echo "There was a problem sending the file via e-mail (Code: $ret_val)." > $finalMessage
+					mail_success=1
+				else 
+					mail_success=1
+				fi  
+				let current_file=current_file+1
+			done 
+		done
+
+		echo "The report has been sent to $destination_email." > $finalMessage
+		if [ $putCopy -eq 1 ]; then
+			echo "Also, a copy has been placed in $HOME." >> $finalMessage 
+		fi
+
+		rm -f $tmpconfig
+		rm -f $tmpls
+
+	;;
+	*) 
+		# File system/removable media mode was created in place.  Nothing to do.
+		echo "The report is at \n$outFile" > $finalMessage
+		;;
+	esac
+
+}
+
+# Restore the file descriptors
+exec 1>&4
+exec 2>&5
+exec 4>&-
+exec 5>&-
+
+#
+# Output the final message
+#
+message=`cat $finalMessage`
+
+# 
+# Clean up
+#
+rm -rf $WORKDIR
+trap - INT TERM EXIT
+
+if [ -z "$message" ]; then
+    message="Report generation aborted."
+fi
+
+$info_method "$message" msg 10 1

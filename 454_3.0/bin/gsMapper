@@ -1,0 +1,204 @@
+#!/bin/bash
+#
+# ---------------------------------------------------------------------
+# GS Mapper Application Start Script for Linux
+# ---------------------------------------------------------------------
+#
+
+# ---------------------------------------------------------------------
+# Ensure the APP_HOME var for this script points to the
+# home directory where application software is installed on your system.
+# ---------------------------------------------------------------------
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE:-$0}")"
+APP_HOME="$(dirname "$(dirname "$SCRIPT_PATH")")"
+APP_HOME_BIN="$APP_HOME"/bin
+APP_HOME_LIB="$APP_HOME"/lib
+APP_HOME_LIBEXEC="$APP_HOME"/libexec
+APP_HOME_CONFIG="$APP_HOME"/config
+APP_HOME_DOC="$APP_HOME"/doc
+APP_HOME_VIDEO="$APP_HOME"/video
+APP_HOME_CONFIG_FILE="$APP_HOME_CONFIG"/gsMapper.vmoptions
+APP_NAME="GS Mapper"
+
+DEFAULT_HEAP_MEM=500
+DEFAULT_PERM_MEM=128
+
+HEAP_MEM=$(grep "Xmx" $APP_HOME_CONFIG_FILE | sed 's/-*[a-zA-Z=:]*//g')
+PER_MEM=$(grep "XX" $APP_HOME_CONFIG_FILE | sed 's/-*[a-zA-Z=:]*//g')
+
+if [ -z $HEAP_MEM ]; then HEAP_MEM=$DEFAULT_HEAP_MEM; fi
+if [ -z $PER_MEM ]; then PER_MEM=$DEFAULT_PERM_MEM; fi
+
+HOME_CONFIG="$APP_HOME_CONFIG"
+
+defaultEnableFeatures=
+defaultEnableVersion=
+defaultEnableVerbose=
+defaultEnableHeadless=false
+defaultRemoteX=
+
+usage ()
+{
+    # Note: --enable intentionally not included as part of usage statement.
+    #       --remoteX, beta feature, intentionally not included as part of use statement
+
+    echo "Usage: $script [--maxHeap <number>] [--maxPerm <number>] [--configDir <directory>]" >&2
+    echo "        --maxHeap   maximum jvm heap space (MB) (default=${HEAP_MEM})" >&2
+    echo "        --maxPerm   maximum jvm permgen space (MB) (default=${PER_MEM})" >&2
+    echo "        --configDir application configuration directory (default=${APP_HOME_CONFIG})" >&2
+    echo "        --version   reports build version and scm tag" >&2
+    echo "        --verbose   reports same as --version plus environment details" >&2
+    exit 100
+}
+
+enableFeatures="$defaultEnableFeatures"
+enableVersion="$defaultEnableVersion"
+enableVerbose="$defaultEnableVerbose"
+enableHeadless="$defaultEnableHeadless"
+remoteX="$defaultRemoteX"
+fourFiveFourVersion=3.0
+
+while [ $# -gt 0 ]
+do
+  case "$1" in
+      --maxHeap)
+	  if [ $# -lt 2 ]; then usage; fi
+	  HEAP_MEM="$2"
+	  shift 2
+          ;;
+      --maxPerm)
+	  if [ $# -lt 2 ]; then usage; fi
+	  PER_MEM="$2"
+	  shift 2
+	  ;;
+      --configDir)
+	  if [ $# -lt 2 ]; then usage; fi
+	  HOME_CONFIG="$2"
+	  shift 2
+	  ;;
+      --enable)
+	  if [ $# -lt 2 ]; then usage; fi
+	  enableFeatures="$2"
+	  shift 2
+	  ;;
+      --version)
+      enableVersion="--version"
+      enableHeadless=true
+      shift
+      ;;
+      --verbose)
+      enableVerbose="--verbose"
+      enableHeadless=true
+      shift
+      ;;
+      --remoteX)
+	  remoteX=1
+	  shift 1
+	  ;;
+      *)
+	  break;
+   esac
+done
+
+# Only accept --verbose if --version also requested
+if [ "$enableVerbose" = "--verbose" ]; then
+    if [ "$enableVersion" != "--version" ]; then
+       echo "--verbose may only be used with --version" >&2
+       usage
+    fi
+fi
+
+# Only accept a number
+echo $HEAP_MEM | grep "[^0-9]" > /dev/null 2>&1
+if [ "$?" -eq "0" ]; then
+    echo "Value '$HEAP_MEM' for --maxHeap is not a positive number" >&2
+    usage
+fi
+
+# Only accept a number
+echo $PER_MEM | grep "[^0-9]" > /dev/null 2>&1
+if [ "$?" -eq "0" ]; then
+    echo "Value '$PER_MEM' for --maxPerm is not a positive number" >&2
+    usage
+fi
+
+
+# Only accept a directory
+if [ ! -d "$HOME_CONFIG" ]; then
+    echo "Value '$HOME_CONFIG' for --configDir is not a directory" >&2
+    usage
+fi
+
+# ---------------------------------------------------------------------
+# Classpath settings (in addition to the classpath in one-jar)
+# ---------------------------------------------------------------------
+# config order is important, custom first then app default.
+APP_CLASS_PATH="$APP_CLASS_PATH:$HOME_CONFIG"
+APP_CLASS_PATH="$APP_CLASS_PATH:$APP_HOME_CONFIG"
+APP_CLASS_PATH="$APP_CLASS_PATH:$APP_HOME_BIN"
+APP_CLASS_PATH="$APP_CLASS_PATH:$APP_HOME_LIBEXEC"
+APP_CLASS_PATH="$APP_CLASS_PATH:$APP_HOME_DOC"
+APP_CLASS_PATH="$APP_CLASS_PATH:$APP_HOME_VIDEO"
+APP_CLASS_PATH="$APP_CLASS_PATH:$APP_HOME/../../bin"
+APP_CLASS_PATH="$APP_CLASS_PATH:$APP_HOME_LIB/assembly-3.0.one-jar.jar"
+
+export APP_CLASS_PATH
+# ---------------------------------------------------------------------
+# Required JVM settings
+# ---------------------------------------------------------------------
+REQUIRED_JVM_ARGS="$REQUIRED_JVM_ARGS -Xmx${HEAP_MEM}M -XX:MaxPermSize=${PER_MEM}M"
+REQUIRED_JVM_ARGS="$REQUIRED_JVM_ARGS -Dapp.launch.command.path=$SCRIPT_PATH"
+
+# ---------------------------------------------------------------------
+# Additional JVM options can be set in the vmoptions file, we do not need that
+# ---------------------------------------------------------------------
+if [ -z "$APP_VM_OPTIONS" ]; then
+  APP_VM_OPTIONS="$APP_HOME_CONFIG_FILE"
+fi
+
+# ---------------------------------------------------------------------
+# Additional JVM options can be set in the vmoptions file, we do not need that
+# ---------------------------------------------------------------------
+JVM_ARGS=`sed /-Xmx/d <"$APP_VM_OPTIONS"|sed /-XX/d|tr '\n' ' ' `
+
+
+# Launch the java application
+stdJavaArgs=($REQUIRED_JVM_ARGS                                         \
+             $JVM_ARGS                                                  \
+             -Dlog4j.configuration=gsMapper.log4j.properties            \
+             -Dhelp.base.file=$APP_HOME_DOC                             \
+             -Djava.awt.headless=$enableHeadless                        \
+             -Done-jar.main.class=com.fourfivefour.assembly.MapperMain  \
+             -cp "$APP_CLASS_PATH"                                      \
+            )
+
+finalJavaArgs=("${stdJavaArgs[@]}")
+
+if [ "$enableFeatures" != "" ]; then
+	finalJavaArgs=("-Dcom.fourfivefour.enable=$enableFeatures" "${finalJavaArgs[@]}")
+fi
+
+if [ "$remoteX" != "" ]; then
+	finalJavaArgs=("-Dsun.java2d.pmoffscreen=false" "${finalJavaArgs[@]}")
+fi
+
+# ---------------------------------------------------------------------
+# Before you run the application specify the location of the
+# java runtime base directory which will be used for running
+# ---------------------------------------------------------------------
+if [ -z "$APP_JRE_HOME" ]; then
+  APP_JRE_HOME="$APP_HOME/../jre/jre1.6.0_30/"
+  if [ -z "$APP_JRE_HOME" ]; then
+    echo "ERROR: Cannot start the $APP_NAME application."
+    echo "ERROR: Cannot find $APP_JRE_HOME"
+    echo "The required Java runtime environment was not found for the $APP_NAME. Please reinstall or contact support."
+  fi
+fi
+
+export JAVA="$APP_JRE_HOME"/bin/java
+
+
+# ---------------------------------------------------------------------
+# Start
+# ---------------------------------------------------------------------
+exec "$JAVA" "${finalJavaArgs[@]}" com.simontuffs.onejar.Boot $enableVersion $enableVerbose $*
