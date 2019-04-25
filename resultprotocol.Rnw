@@ -146,8 +146,8 @@ If you use RIEMS results for publications, please cite \textsuperscript{\ref{fn:
 \section{Technical summary}
 Below you find an overview of important parameters of the analysis, including information about result files and their md5 checksums to check the integrity of the files, software versions, and database version. Please note that for compatibility reasons, underscores in filenames are replaced by hyphens.
 \singlespacing
-\begin{longtable}{ll}%[ht]
-%\begin{tabular}{ll}
+%\begin{longtable}{ll}%[ht]
+\begin{tabular}{ll}
 \vspace{0.25cm}
 \textbf{\textit{sample:}} & \parbox[t]{10cm}{\Sexpr{input}} \\ 
 \vspace{0.25cm}
@@ -180,8 +180,8 @@ Below you find an overview of important parameters of the analysis, including in
 \textbf{\textit{version r:}} &  \Sexpr{r}\\ 
 \vspace{0.25cm}
 \textbf{\textit{version \LaTeX{}:}} & \Sexpr{texversion}\\
-%\end{tabular} 
-\end{longtable}
+\end{tabular} 
+%\end{longtable}
 \newpage
 
 \section{Input data and overall classification}

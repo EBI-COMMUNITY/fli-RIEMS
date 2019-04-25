@@ -23,7 +23,8 @@
 
 cd ${arbeitsvz}                                                                                    
 
-echo -ne "\nRead quality trimming... "                                                                  # user info
+echo -ne "\n$(date) --> Read quality trimming... "                                                                  # user info
+SECONDS=0
 
 i=0
 while (( $i < 1 ))
@@ -35,6 +36,8 @@ while (( $i < 1 ))
         
         if [[ -n ${illumina_input} ]]    
             then
+                echo "Processing illumina"
+                echo ${gsflxdir}/runMapping -force -m -cpu ${threads} -ud -np -no -tr -mi 100 -ml 100 -vt ${il_adapter} -o ${arbeitsvz}/Dil-Mapping ${referenz_trimming} ${illumina_input[@]} 1>/dev/null  # Dummy-Mapping Illumina
                 ${gsflxdir}/runMapping -force -m -cpu ${threads} -ud -np -no -tr -mi 100 -ml 100 -vt ${il_adapter} -o ${arbeitsvz}/Dil-Mapping ${referenz_trimming} ${illumina_input[@]} 1>/dev/null  # Dummy-Mapping Illumina
         fi #Quality Mapping of Illumina data input with adapter trimming
         
@@ -74,7 +77,10 @@ if (( $i > 0 ))                                                                 
         rm ${arbeitsvz}/tmp1.txt ${arbeitsvz}/tmp3.txt                                                  # and delete temporary files
 fi
 
-echo "finished"                                                                                         # user info
+duration=$SECONDS
+echo "finished --> $(date)"                                                                                         # user info
+echo -ne "\nTotal time taken for quality and adapter trimming was $(($duration / 60)) minutes and $(($duration % 60)) seconds."
+echo -ne "\nTIMING $duration Initial trimming"
 
 
 

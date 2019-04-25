@@ -18,9 +18,9 @@
 
 #!/bin/bash
     
-. path-name/RIEMS/Config.txt                                                                                            # <- Path of config file
-. path-name/RIEMS/functions.sh                                                                                          # and path to functions
-. path-name/RIEMS/TaxidDetermination.sh                                                                                 # and path to more functions
+. /hps/nobackup/nucleotide/rahman/development/fli-RIEMS/Config.txt                                                                                            # <- Path of config file
+. /hps/nobackup/nucleotide/rahman/development/fli-RIEMS/functions.sh                                                                                          # and path to functions
+. /hps/nobackup/nucleotide/rahman/development/fli-RIEMS/TaxidDetermination.sh                                                                                 # and path to more functions
     
 echo -e "\n
 ***************** RIEMS 4.0 - Reliable Information Extraction of Metagenomic Sequence datasets ******************    
@@ -92,10 +92,10 @@ fi
 arbeitsvz=${outputordner}/${projektname}                                                                        # define working directory with outputfolder and project
     
 if [ -d ${arbeitsvz} ]  
-    then                                                                                                        # if working directory already exists 
+    then                                                                                                        # if working directory already exists
         echo -e "\n\nThere is already a Folder named '${arbeitsvz}' in your current output directory."          # show info to user and exit program
-        echo -e "Please delete or rename this Folder and start the analysis again.\n" ; exit    
-    else    
+    #    echo -e "Please delete or rename this Folder and start the analysis again.\n" ; exit
+    else
         mkdir -p ${arbeitsvz}/Ausgangsdateien                                                                   # creat working directory and directory "Ausgangsdateien"
         mkdir ${arbeitsvz}/MultiBlast                                                                           # create Blast directory                                                                          
         touch ${arbeitsvz}/AnBlast.txt                                                                          # create empty Anblast.txt file
@@ -152,7 +152,6 @@ if ! [[ -s ${installdir}/gi_exclude.txt ]]                                      
     then
         . ${installdir}/TaxID_exclude.sh                                                                        # start TaxID_exclude.sh to create that list
 fi
-
 echo -ne "For progress please check ${arbeitsvz}/progress.log.\n\n"                                             # user info
 
 . ${installdir}/metagenomanalyse_neu.sh 1>${arbeitsvz}/progress.log 2>${arbeitsvz}/error.log                    # start metagenomic workflow and save errors in error.log and terminal output in progress.log

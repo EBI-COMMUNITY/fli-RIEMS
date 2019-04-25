@@ -1,3 +1,5 @@
+#!/bin/bash
+
 #    Blast_functions.sh - part of RIEMS - Reliable Information Extraction from Metagenomic Sequence datasets
 #    Copyright (C) 2009-2016  Ariane Belka, Maria Jenckel, Matthias Scheuch, Dirk Hoeper
 #
@@ -14,8 +16,6 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-
-#!/bin/bash
 
 function sortBlastResults()
 {

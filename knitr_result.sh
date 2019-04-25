@@ -39,7 +39,7 @@ if [[ $resultprotocol == "y" ]]                                                 
         date >> zeiten.log                                                                      # date to zeiten.log
         ${R}/Rscript -e "library(knitr); knit('${scriptT}')" 12 &>>${arbeitsvz}/console.log     # start R script by using knitR (resultprotocol.Rnw)
         date >> zeiten.log                                                                      # date to zeiten.log
-        
+
         tex2pdf=${arbeitsvz}/resultprotocol.tex                                                 # add filename to variable
         echo "Construct: *.pdf" >> zeiten.log                                                   # info to zeiten.log
         date >> zeiten.log                                                                      # date to zeiten.log

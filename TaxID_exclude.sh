@@ -1,3 +1,5 @@
+#!/bin/bash
+
 #    TaxID_exclude.sh - part of RIEMS - Reliable Information Extraction from Metagenomic Sequence datasets
 #    Copyright (C) 2009-2016  Ariane Belka, Maria Jenckel, Matthias Scheuch, Dirk Hoeper
 #
@@ -16,7 +18,6 @@
 
 
 
-#!/bin/bash
 #this subscript of the RIEMS workflow generates a gi-list to exclude during the analysis
 #by default following Tax-ID are excluded: 48479, 28384, 12908
 

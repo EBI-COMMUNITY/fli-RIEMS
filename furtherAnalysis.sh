@@ -27,7 +27,8 @@ scriptFurther=${installdir}/resultprotocol_further.R
 scriptTFurther=${installdir}/resultprotocol_further.Rnw
 
 ################################### Assembly of RestReads + Blastp ######################################
-echo -ne "$restreads will be assembled\n"
+echo -ne "$(date) --> $restreads will be assembled\n"
+SECONDS=0
 ${gsflxdir}/runAssembly -o assemblyFA -fi ${arbeitsvz}/restAcc.txt -notrim -tr -force -noinfo -cpu ${threads} -acedir -ml 20 ${arbeitsvz}/TrimmedReads.fastq 1>/dev/null
 ContigRead=Contig
 method=Blastp_vs_protdb
@@ -41,7 +42,8 @@ if [[ -s ${arbeitsvz}/assemblyFA/454AllContigs.fna ]]
                 numorf=0
         fi
         echo -ne "\nBLAST (blastp) of $numorf potential ORFs protein database...\n"
-        ${blastdir}/blastp -db ${protdb} -num_threads ${threads} -negative_gilist ${installdir}/gi_exclude.txt -evalue ${evalue} -max_target_seqs 1 -out Hits.txt -query 454AllContigs.orf -max_hsps 1 -outfmt '6 qseqid sseqid qstart qend qlen evalue pident staxid length qcovs' 
+        #${blastdir}/blastp -db ${protdb} -num_threads ${threads} -negative_gilist ${installdir}/gi_exclude.txt -evalue ${evalue} -max_target_seqs 1 -out Hits.txt -query 454AllContigs.orf -max_hsps 1 -outfmt '6 qseqid sseqid qstart qend qlen evalue pident staxid length qcovs' 
+        ${blastdir}/blastp -db ${protdb} -num_threads ${threads} -evalue ${evalue} -max_target_seqs 1 -out Hits.txt -query 454AllContigs.orf -max_hsps 1 -outfmt '6 qseqid sseqid qstart qend qlen evalue pident staxid length qcovs' 
         if [[ -s Hits.txt ]]
             then
                 echo -e "Accno \tRefsequence-ID \tHit-Range \t\tLength \tE-value \tperc.identity \tTax-ID \t$rank Tax-ID \tSuperkingdom Tax-ID \n" > Blast-Hits.txt   # create a file with header for blast-results
@@ -69,10 +71,14 @@ if [[ -s ${arbeitsvz}/assemblyFA/454AllContigs.fna ]]
                 getOutput
         fi
 fi
+duration=$SECONDS
+echo -ne "\nTotal time taken for assembly and Blastp of unassigned contigs was $(($duration / 60)) minutes and $(($duration % 60)) seconds."
+echo -ne "\nTIMING $duration Unassigned contigs assembly and blastp" 
 
 ################################### Blastp of RestReads ##############################################
 ContigRead=Read        
-echo -ne "protein sequences of $restreads sequences will be analysed\n"
+echo -ne "\n$(date) --> protein sequences of $restreads sequences will be analysed\n"
+SECONDS=0
 
 method=Blastp_vs_protdb                                                                                         # set method (needed for output)
 
@@ -88,11 +94,15 @@ method=Blastp_vs_protdb                                                         
 echo -ne "$restreads\t$method\n" >> ${arbeitsvz}/report.txt
 
 cd ${arbeitsvz}
+duration=$SECONDS
+echo -ne "\nTotal time taken for Blastp of rest unassigned reads was $(($duration / 60)) minutes and $(($duration % 60)) seconds."
+echo -ne "\nTIMING $duration Blastp unassigned reads" 
                                                          
 ################################### Blastx of RestReads ##############################################
 
 ContigRead=Read        
-echo -ne "protein sequences of $restreads sequences will be analysed\n"
+echo -ne "\n$(date) --> protein sequences of $restreads sequences will be analysed\n"
+SECONDS=0
 
 method=Blastx_vs_protdb                                                                                         # set method (needed for output)
 
@@ -107,10 +117,15 @@ method=Blastx_vs_protdb                                                         
 echo -ne "$restreads\t$method\n" >> ${arbeitsvz}/report.txt
 
 cd ${arbeitsvz}
+duration=$SECONDS
+echo -ne "\nTotal time taken for Blastx of remaining reads was $(($duration / 60)) minutes and $(($duration % 60)) seconds."
+echo -ne "\nTIMING $duration Blastx unassigned reads" 
+
  ############################### tBlastx of RestReads ######################################################
 
 ContigRead=Read        
-echo -ne "protein sequences of $restreads sequences will be analysed\n"
+echo -ne "\n$(date) --> protein sequences of $restreads sequences will be analysed\n"
+SECONDS=0
 
 method=tBlastx_vs_ntdb                                                                                          # set method (needed for output)
 
@@ -125,6 +140,9 @@ method=tBlastx_vs_ntdb                                                          
 echo -ne "$restreads\t$method\n" >> ${arbeitsvz}/report.txt
 
 cd ${arbeitsvz}
+duration=$SECONDS
+echo -ne "\nTotal time taken for tBlastx of unassigned reads was $(($duration / 60)) minutes and $(($duration % 60)) seconds."
+echo -ne "\nTIMING $duration tBlastx unassigned reads"
 
 ################################# Get Family Names for further analysis #####################################
 
@@ -198,6 +216,6 @@ if [[ $resultprotocol == "y" ]]
         mv resultprotocol-complete-pep.txt ${projektname}-resultprotocol-complete_pep.txt
         mv resultprotocol-compact.txt ${projektname}-resultprotocol-compact.txt
         mv resultprotocol-complete.txt ${projektname}-resultprotocol-complete.txt
-        echo -ne "Done"
+        echo -ne "Done --> $(date)"
             
 fi

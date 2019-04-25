@@ -1,3 +1,5 @@
+#!/bin/bash
+
 #    TaxidDetermination.sh - part of RIEMS - Reliable Information Extraction from Metagenomic Sequence datasets
 #    Copyright (C) 2009-2016  Ariane Belka, Maria Jenckel, Matthias Scheuch, Dirk Hoeper
 #
@@ -15,7 +17,6 @@
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
-#!/bin/bash
 
 function get_species() {
 taxid=$tid                                                                                                  # assign tid to taxid (basically the same)

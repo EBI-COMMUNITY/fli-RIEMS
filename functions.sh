@@ -86,16 +86,24 @@ fi
 function subset_analyses()
 {
 while (( ${restreads} > $cutoffAssembly && rndseqextract < 2 )) || [[ ! -s ${arbeitsvz}/references.txt ]]                   # as long as more than 10000 reads are remaining and assembly has not failed twice in a row continue
-    do                                                                                                                      
+    do
         identity=97         
-        echo -ne "\nA subset of 50000 reads will be created... "            
-        shuf -n 50000 ${arbeitsvz}/restAcc.txt > ${arbeitsvz}/tmp1.txt                                                      # get a list of 5000 random accnos
+        echo -ne "\n$(date) --> A subset of 50000 reads will be created... "            
+        shuf -n 20000 ${arbeitsvz}/restAcc.txt > ${arbeitsvz}/tmp1.txt                                                      # get a list of 5000 random accnos
         echo "assembly of subset... "
         ${gsflxdir}/runAssembly -o ${arbeitsvz}/assembly -fi ${arbeitsvz}/tmp1.txt -force -cpu ${threads} -mi 97 -notrim -nobig -noinfo -a 100  ${arbeitsvz}/TrimmedReads.fastq 1>/dev/null ; wait   # and assemble them
         # Assembly of subset; -a 100 (min length of contig) -force overwrite if existing; -nobig, -noinfo suppress big data files, -mi minimum identity of reads to be assembled
         echo "finished"
 # get contigs by numreads or depth ...
         mappingdir=${arbeitsvz}/assembly
+
+        ######### ADDITION
+        #spec=`date +%k%M%S`
+        #foldername=assembly_${spec}
+        #mkdir ${arbeitsvz}/${foldername}
+        #cp -r ${mappingdir} ${arbeitsvz}/${foldername}
+        ##################
+
         cd ${mappingdir}                                                                                                    # change directory
     if [ -s ${mappingdir}/454AllContigs.fna ]                                                                               # if assembly was successful and contigs are available, then ...
         then            
@@ -129,7 +137,7 @@ while (( ${restreads} > $cutoffAssembly && rndseqextract < 2 )) || [[ ! -s ${arb
                     cut -f 1 ${mappingdir}/assembledReads.txt | sort | uniq > ${mappingdir}/assembledAcc.txt
                     diff ${mappingdir}/assembledAcc.txt ${arbeitsvz}/restAcc.txt | grep "^>" | sed 's/^> //g' > ${mappingdir}/restAcc.txt               # compare exclude list and allAcc-list, take all that are not included in exclude list (-3), remove tab-stops at beginning of list and write to restAcc.txt   # compare exclude list and allAcc-list, take all that are not included in exclude list (-3), remove tab-stops at beginning of list and write to restAcc.txt
                     map_vs_contigs          
-                    echo -ne "\nSpecies will be identified for assembled contigs... "                                       # user info
+                    echo -ne "\n$(date) --> Species will be identified for assembled contigs... "                                       # user info
                     mbcr=contig                                                                                             # set mbrc to contig                                                                                                                                                                    
                     . ${installdir}/MegaBlast-Contigs-Reads.sh                                                              # start MegaBlast-Contig-Read.sh tool    
                 else                                                                                                
@@ -143,8 +151,8 @@ while (( ${restreads} > $cutoffAssembly && rndseqextract < 2 )) || [[ ! -s ${arb
                     
     rm ${arbeitsvz}/assembly/contig*                                                                                        # delete all files in the assembly folder
     cd ${arbeitsvz}/Ausgangsdateien                                                                                         # change directory
-    rm -r ${arbeitsvz}/assembly                                                                                             # remove the assembly directory
-done            
+    #rm -r ${arbeitsvz}/assembly                                                                                             # remove the assembly directory
+done 
 }   
 
 function get_mapping_results() 

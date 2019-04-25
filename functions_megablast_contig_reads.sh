@@ -16,6 +16,7 @@
 
 #!/bin/bash
 
+
 function get_tid() {
     gesamt=`wc -l < Blast-Hits.txt`                                                             # get number of blast-hits
     cut -f4 Blast-Hits.txt > tid.txt                                                            # get 4th column of Blast-Hits to get taxid

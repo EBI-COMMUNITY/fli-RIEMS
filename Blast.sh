@@ -56,18 +56,22 @@ elif [ $referenz == $protdb ]
 fi
 if [ $ntblast == blastp ]                                                              # if the reference is the protein database and the 2nd parameter in blastvek is unequal to db, then ....
     then 
-        $blastdir/blastp -db $protdb -num_threads $threads -negative_gilist ${installdir}/gi_exclude.txt -evalue $evalue -max_target_seqs 1 -out $blastordner/Hits.txt -query $query -max_hsps 1 -outfmt '6 qseqid sseqid qstart qend qlen evalue pident staxid length qcovs' 
+        $blastdir/blastp -db $protdb -num_threads $threads -evalue $evalue -max_target_seqs 1 -out $blastordner/Hits.txt -query $query -max_hsps 1 -outfmt '6 qseqid sseqid qstart qend qlen evalue pident staxid length qcovs'
+        #$blastdir/blastp -db $protdb -num_threads $threads -negative_gilist ${installdir}/gi_exclude.txt -evalue $evalue -max_target_seqs 1 -out $blastordner/Hits.txt -query $query -max_hsps 1 -outfmt '6 qseqid sseqid qstart qend qlen evalue pident staxid length qcovs'
         # perform blastp; negative gilist includes gis for environment samples and synthetic constructs, max_target_seqs and max_hsps have to be set to 1 to get only one result per sequence; output="tab-seperated(6) query sequence id; subtject sequence id; query start; query end; query length; evalue; identity; taxid"
 elif [[ $ntblast == blastx ]]                                                                                       # if ntblast is set to tblastx, then ...
     then
-        $blastdir/blastx -db $protdb -num_threads $threads -negative_gilist ${installdir}/gi_exclude.txt -evalue $evalue -max_target_seqs 1 -out $blastordner/Hits.txt -query $query -max_hsps 1 -outfmt '6 qseqid sseqid qstart qend qlen evalue pident staxid' 
+        $blastdir/blastx -db $protdb -num_threads $threads -evalue $evalue -max_target_seqs 1 -out $blastordner/Hits.txt -query $query -max_hsps 1 -outfmt '6 qseqid sseqid qstart qend qlen evalue pident staxid'
+        #$blastdir/blastx -db $protdb -num_threads $threads -negative_gilist ${installdir}/gi_exclude.txt -evalue $evalue -max_target_seqs 1 -out $blastordner/Hits.txt -query $query -max_hsps 1 -outfmt '6 qseqid sseqid qstart qend qlen evalue pident staxid'
         # perform blastx; negative gilist includes gis for environment samples and synthetic constructs, max_target_seqs and max_hsps have to be set to 1 to get only one result per sequence; output="tab-seperated(6) query sequence id; subtject sequence id; query start; query end; query length; evalue; identity; taxid"
 elif [[ $ntblast == tblastx ]]                                                                                      # if ntblast is set to tblastx, then ...
     then
-        $blastdir/tblastx -db $referenz -num_threads $threads -negative_gilist ${installdir}/gi_exclude.txt -evalue $evalue -max_target_seqs 1 -out $blastordner/Hits.txt -query $query -max_hsps 1 -outfmt '6 qseqid sseqid qstart qend qlen evalue pident staxid' 
+        $blastdir/tblastx -db $referenz -num_threads $threads -evalue $evalue -max_target_seqs 1 -out $blastordner/Hits.txt -query $query -max_hsps 1 -outfmt '6 qseqid sseqid qstart qend qlen evalue pident staxid'
+        #$blastdir/tblastx -db $referenz -num_threads $threads -negative_gilist ${installdir}/gi_exclude.txt -evalue $evalue -max_target_seqs 1 -out $blastordner/Hits.txt -query $query -max_hsps 1 -outfmt '6 qseqid sseqid qstart qend qlen evalue pident staxid'
         # perform tblastx; negative gilist includes gis for environment samples and synthetic constructs, max_target_seqs and max_hsps have to be set to 1 to get only one result per sequence; output="tab-seperated(6) query sequence id; subtject sequence id; query start; query end; query length; evalue; identity; taxid"
     else                                                                                                            # otherwise, ...
-        $blastdir/blastn -task $ntblast -db $referenz -negative_gilist ${installdir}/gi_exclude.txt -num_threads $threads -evalue $evalue -max_target_seqs 1 -out $blastordner/Hits.txt -query $query -max_hsps 1 -outfmt '6 qseqid sseqid qstart qend qlen evalue pident staxid qcovs' 
+        $blastdir/blastn -task $ntblast -db $referenz -num_threads $threads -evalue $evalue -max_target_seqs 1 -out $blastordner/Hits.txt -query $query -max_hsps 1 -outfmt '6 qseqid sseqid qstart qend qlen evalue pident staxid qcovs'
+        #$blastdir/blastn -task $ntblast -db $referenz -negative_gilist ${installdir}/gi_exclude.txt -num_threads $threads -evalue $evalue -max_target_seqs 1 -out $blastordner/Hits.txt -query $query -max_hsps 1 -outfmt '6 qseqid sseqid qstart qend qlen evalue pident staxid qcovs'
         # perform blastn (megablast depending on -task); negative gilist includes gis for environment samples and synthetic constructs, max_target_seqs and max_hsps have to be set to 1 to get only one result per sequence; output="tab-seperated(6) query sequence id; subtject sequence id; query start; query end; query length; evalue; identity; taxid"
 
         if [[ $method != Blastn_vs_ntdb ]]
@@ -98,4 +102,4 @@ if [ -s $blastordner/AllHits.txt ]                                              
         BlastHitTaxid                                                                                               # process data (see Blast_functions.sh)
 fi
 #rm $query 2>/dev/null
-rm $blastordner/tid-*.txt  ; rm $blastordner/uniq-tids.txt  ; rm $blastordner/AllHits*.txt                          # remove files not of use anymore
+rm $blastordner/tid*  ; rm $blastordner/uniq-tids.txt  ; rm $blastordner/AllHits*.txt                          # remove files not of use anymore

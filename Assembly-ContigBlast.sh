@@ -1,3 +1,4 @@
+#!/bin/bash
 #    Assemnly-ContigBlast.sh - part of RIEMS - Reliable Information Extraction from Metagenomic Sequence datasets
 #    Copyright (C) 2009-2016  Ariane Belka, Maria Jenckel, Matthias Scheuch, Dirk Hoeper
 #
@@ -15,10 +16,9 @@
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
-#!/bin/bash
-
 . ${installdir}/Config.txt                                                                                                            # <- Path of config file (unchanged)
 
+#chmod a+rxw ${arbeitsvz}/Assembly
 outputordner=${arbeitsvz}/Assembly                                                                                                    # Defining working directory
 
 ########################################################### functions ####################################################################################
@@ -27,19 +27,27 @@ outputordner=${arbeitsvz}/Assembly                                              
 # Ermittlung der Dateiendung; falls vom User eine sff-datei eingegeben wurde, muss diese noch in eine fna-Datei umgewandelt werden
 
 mkdir -p $outputordner                                                                                                          # creat directory
-cd $outputordner                                                                                                                # change to working directory
+mkdir -p $outputordner/Assembly
+chmod a+rxw $outputordner/Assembly
+
 allaccnos=`wc -l < ${arbeitsvz}/restAcc.txt `                                                                                   # count all unassigned reads
         
-echo -ne "\n\nRunning ASSEMBLY of all $allaccnos unassigned Reads... \n"                                                        # user info
+echo -ne "\n\n$(date) --> Running ASSEMBLY of all $allaccnos unassigned Reads... \n"                                                        # user info
 
 process=newbler
 
+#cp ${arbeitsvz}/restAcc.txt ${arbeitsvz}/restAcc_`date +"%T"`
+echo -ne "Carrying out assembly of unassigned reads: \n"
+echo -ne "${gsflxdir}/runAssembly -rip -o ${outputordner}/Assembly -fi ${arbeitsvz}/restAcc.txt -notrim -tr -force -noinfo -cpu ${threads} -acedir -ml 20 ${arbeitsvz}/TrimmedReads.fastq"
+echo -ne "${gsflxdir}/fnafile -o ${arbeitsvz}/restReads.fasta -i ${arbeitsvz}/restAcc.txt ${arbeitsvz}/TrimmedReads.fasta"
 ${gsflxdir}/fnafile -o ${arbeitsvz}/restReads.fasta -i ${arbeitsvz}/restAcc.txt ${arbeitsvz}/TrimmedReads.fasta                 # creat fasta-file of all unassigned reads
-${gsflxdir}/runAssembly -rip -o ${outputordner}/Assembly -fi ${arbeitsvz}/restAcc.txt -notrim -tr -force -noinfo -cpu ${threads} -acedir -ml 20 ${arbeitsvz}/TrimmedReads.fastq 1>/dev/null & # runAssembly with all unassigned reads
+${gsflxdir}/runAssembly -rip -o ${outputordner}/Assembly -fi ${arbeitsvz}/restAcc.txt -notrim -tr -force -noinfo -cpu ${threads} -acedir -ml 20 ${arbeitsvz}/TrimmedReads.fastq #1>/dev/null & # runAssembly with all unassigned reads
+#cp ${outputordner}/Assembly/454AllContigs.fna ${arbeitsvz}/454AllContigs.fna.`date| perl -lne '~s/ //g;print;'`
    # -force: force overwriting ; -acedir: directory with info about read assignment to contigs; -ml min length of read ( in %) to be assembled
-   # -ml: wahrscheinlich minimale Länge eines Reads in % um Bestandteil eines Contigs zu werden
+   # -ml: wahrscheinlich minimale Lï¿½nge eines Reads in % um Bestandteil eines Contigs zu werden
+cd $outputordner
 
-echo -ne "\nData processing... "                                                                                                # user info
+echo -ne "\n$(date) --> Data processing... "                                                                                                # user info
 if [[ -s Assembly/454ReadStatus.txt ]] && [[ -s Assembly/454AllContigs.fna ]]
     then 
         egrep "Assembled|Repeat" Assembly/454ReadStatus.txt > Assembly/assembledAcc.txt                                         # grep readstatus for assembled reads
@@ -65,6 +73,7 @@ if [[ -s Assembly/454ReadStatus.txt ]] && [[ -s Assembly/454AllContigs.fna ]]
                 # megablast of Reads vs Contigs
         if [[ -s Assembly/Megablast_Unassigned.txt ]]                                                                           # if Assembly/Megablast_Unassigned.txt exists (Blast was successful and had hits), then ...
             then
+                #cp Assembly/Megablast_Unassigned.txt ${arbeitsvz}/Megablast_Unassigned.txt.`date| perl -lne '~s/ //g;print;'`
                 #echo -ne "\rRunning Megablast... data processing... "                                                          # user info
                 gesamt=`wc -l < Assembly/Megablast_Unassigned.txt`                                                              # count number of Hits
                 while read line                                                                                                 # while reading Megablast_Unassigned.txt, do ...
@@ -84,13 +93,15 @@ if [[ -s Assembly/454ReadStatus.txt ]] && [[ -s Assembly/454AllContigs.fna ]]
 
 ###################################################################### Blastn Contigs #####################################################################
         # Aufruf des Blast Programms
-        echo -ne "\n\nRunning BLAST to identify the Contigs\n"                                                                  # user info
+        echo -ne "\n\nRunning Megablast to identify the Contigs\n"                                                                  # user info
         
         blastvek=(0 0 tax 0 0)                                                                                                  # set blastvek for Blast.sh
         query=${outputordner}/Assembly/454AllContigs.fna                                                                        # set query for Blast.sh
         blastordner=${outputordner}/Blast                                                                                       # set blastfolder for Blast.sh
         ntblast=megablast                                                                                                       # set which blast for Blast.sh
-        referenz=$ntdb                                                                                                          # set reference for Blast.sh 
+        referenz=$ntdb                                                                                                          # set reference for Blast.sh
+        mkdir -p $blastordner
+        cd $blastordner
         . $installdir/Blast.sh                                                                                                  # Blast.sh
         
         # Zu den Family Tax-id zugeordneten Contigs aus dem Blast, werden die Accnos herausgesucht
@@ -104,9 +115,13 @@ if [[ -s Assembly/454ReadStatus.txt ]] && [[ -s Assembly/454AllContigs.fna ]]
         cut -f1 454AllContigs-BlastnHits.txt > assignedContigs.txt                                                              # cut first column of Hits to cet all column that were assigned
         grep -v -f assignedContigs.txt allContigs.txt > unassignedContigs.txt                                                   # grep all except the contigs that were assigned (header) (-f to take a file)
         ${gsflxdir}/fnafile -i unassignedContigs.txt -o unassignedContigs.fna 454AllContigs.fna                                 # write all unassigned Contigs to new file
-        
+
+        # ==================================================== #
+        #cp -R ${outputordner}/Blast/ ${arbeitsvz}/AssemblyBlast_`date| perl -lne '~s/ //g;print;'`
+        # ==================================================== #
         rm ${outputordner}/Blast/*                                                                                              # remove all input in Blastfolder for next blast
-        
+
+        echo -ne "\n\nRunning Blastn of unassigned contigs v nt"
         blastvek=(0 0 tax 0 0)                                                                                                  # set blastvek for Blast.sh
         query=${outputordner}/unassignedContigs.fna                                                                             # set query for Blast.sh
         blastordner=${outputordner}/Blast                                                                                       # set blastfolder for Blast.sh
@@ -211,5 +226,5 @@ if [[ -s Assembly/454ReadStatus.txt ]] && [[ -s Assembly/454AllContigs.fna ]]
 #                let assfailcounter=assfailcounter+1
 #        fi
         
-        echo -ne "finished!\n"                                                                                                  # user info
-fi                                                                                                           
+        echo -ne "finished! --> $(date)\n"                                                                                                  # user info
+fi

@@ -13,7 +13,6 @@ TrimStatus <- read.delim("TrimStatus.txt", quote="", stringsAsFactors=FALSE)
 asignedAcc <- read.delim("asignedAcc.txt", header=FALSE, quote="", stringsAsFactors=FALSE,col.names = c("Method","SkTax","FamTax","Tax","Scientific.Name","Identity","Accession","ReadStatus","MapIdentity","MapPercent","MapReference"))
 FamTaxNames <- read.delim("famtax_names.txt",header=FALSE, quote="", stringsAsFactors=FALSE)
 
-
 ############################### Complete Resultprotocol
 
 TrimStatus$SeqId <- TrimStatus$Orig.Trimpoints <- TrimStatus$Orig.Trimmed.Length <- TrimStatus$Used.Trimmed.Length <- NULL
@@ -90,7 +89,8 @@ TaxIDs <- TaxIDs[order(TaxIDs$SkTax,TaxIDs$FamTax,TaxIDs$counts,decreasing = T),
 
 eucaryote <- TaxIDs[which(TaxIDs$SkTax==2759),]
 
-TaxIDs <- TaxIDs[-(which(TaxIDs$SkTax==2759)),]
+#TaxIDs <- TaxIDs[-(which(TaxIDs$SkTax==2759)),]
+TaxIDs <- TaxIDs[which(TaxIDs$SkTax!=2759),]
 
 TaxIDs <- rbind(TaxIDs,eucaryote)
 

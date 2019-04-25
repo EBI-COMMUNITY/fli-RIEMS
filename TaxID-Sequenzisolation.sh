@@ -1,3 +1,5 @@
+#!/bin/bash
+
 #    TaxID-Sequenzisolation.sh - part of RIEMS - Reliable Information Extraction from MEtagenomic Sequence datasets
 #    Copyright (C) 2009-2016  Ariane Belka, Maria Jenckel, Matthias Scheuch, Dirk Hoeper
 #
@@ -16,7 +18,6 @@
 
 
 
-#!/bin/bash
 
 ####################################################### Voreinstellungen bei direkter Benutzung ##########################################################
 

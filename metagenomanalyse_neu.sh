@@ -41,7 +41,7 @@ RIEMS 4.0 Workflow started at `date`\n\n"                                       
 trim=`wc -l < ${arbeitsvz}/asignedAcc.txt `                                                                     # count number of reads that were discarded after trimming
 untrim=`wc -l < ${arbeitsvz}/allAcc.txt `                                                                       # count number of total reads
 ${embossdir}/seqret -sequence ${arbeitsvz}/TrimmedReads.fastq -outseq ${arbeitsvz}/TrimmedReads.fasta           # convert the fastq-file into a fasta-file    
-echo -ne "\nA total of $untrim Reads was added to the metagenomic workflow \n     
+echo -ne "\n$(date) --> A total of $untrim Reads was added to the metagenomic workflow \n     
 $trim Reads were marked as low quality Reads \n\n"                                                              # user info
 
 ######################################################################### ViRIEMS ########################################################################
@@ -57,7 +57,7 @@ restreads=`wc -l < ${arbeitsvz}/restAcc.txt`                                    
 
 if [ -s ${arbeitsvz}/uniq-tids.txt ]                                                                            # if taxid were given in advance
     then    
-        echo -ne "Following tax-ids have been given for prior assignment: ${tax[*]} "                           # user info
+        echo -ne "$(date) --> Following tax-ids have been given for prior assignment: ${tax[*]} "                           # user info
         echo -ne "\nStarting with assigning the reads to given tax-ids "                                        # user info
         identity=90                                                                                             # set identity to 90 for pre-screening
         method=Pre-Screening                                                                                    # set method to pre-screening
@@ -75,7 +75,8 @@ if [ -s ${arbeitsvz}/uniq-tids.txt ]                                            
         identity=97                                                                                             # set identity to 97
         subset_analyses                                                                                         # and start the analysis of subsets
         echo -ne "$restreads\t$method\n" >> ${arbeitsvz}/report.txt
- fi        
+fi
+
 ################################################################# Megablast der Rnd. Reads ###############################################################
 
 restreads=`wc -l ${arbeitsvz}/restAcc.txt | cut -d " " -f1`                                                     # count all remaing reads
@@ -98,74 +99,91 @@ while (( ${restreads} > $cutoffRndReads && rndseqextract < 2 ))                 
         . ${installdir}/MegaBlast-Contigs-Reads.sh                                                              # call MegaBlast-Contigs-Reads.sh
         restreads=`wc -l < ${arbeitsvz}/restAcc.txt `                                                           # count all remaining reads
         echo -ne "$restreads\t$method\n" >> ${arbeitsvz}/report.txt
-    done
+    done;
 
 ################################################################# Mapping 2 #############################################################################
 
 if [[ -s ${arbeitsvz}/references.txt ]]                                                                         # if a references.txt file exists in the working directory (if previous analysis steps were successful), then ...
     then
-        echo -ne "\n\nWe will map again with a lower cutoff (90%) against all previous detected species\n"      # user info
+        SECONDS=0
+        echo -ne "\n\n$(date) --> We will map again with a lower cutoff (90%) against all previous detected species\n"      # user info
         method=Mapping2                                                                                         # set method to Mapping2
-        identity=90                                                                                             # set identity to 90 
+        identity=90                                                                                             # set identity to 90
+        cat ${arbeitsvz}/references.txt | xargs file | grep -v cannot | cut -f1 -d ':' > ${arbeitsvz}/existing_references.txt # Only carry out mapping against reference files that exist
         while read line                                                                                         # while reading the references.txt file, do ...
             do
-                i=`echo $line | sed 's/.*\///'`                                                                 # i is the reference without the whole path
-                name=`echo "${line##*/}" | sed 's/.fna//'`                                                      # get name from line without the ending .fna
-                organism=`basename $line`                                                                       # get organism as basename from line
-                name2=`echo $name | sed 's/.*_//'`                                                              # get name2 by deleting TID-XXX_
-                tid=`echo $name | sed 's/_.*//' | sed 's/.*-//' `                                               # extract TID from line
-                ziel=${arbeitsvz}/${name}                                                                       # set working directory (combination of working directory and name)
-                zielordner=${ziel}/Mapping2                                                                     # set new directory as Mapping2
-                cd ${ziel}                                                                                      # change directory
-                num=`wc -l < ${arbeitsvz}/restAcc.txt`                                                          # count number of remaining reads
-                echo -ne "\n\nMapping again against $name2\n"                                                   # user info
-                if (( $num > 20000 ))                                                                            # if more than 10000 reads are left, then ...
+                if [ -z "$line" ]
                     then
-                        mkdir Mapping2                                                                          # create directory Mapping2
-                        cd Mapping2                                                                             # and change directory to Mapping2
-                        mem=`free -bt | tail -n 1 | cut -f 5 -d " "`                                                                    # get free memory
-                        size=`du -b $line | cut -f 1`                                                                               # get size of reference
-                        ((j=$mem/(2*$size)))                                                                                            # calculate how much mappings can be startet in parallel (twice the size because reads have to loaded and software needs memory itself)
-                        if (( $j > $threads ))                                                                                           # if more processes could be started than cores available, then ...
-                            then
-                                j=$threads                                                                                              # set processes to start to cores available
-                        fi
-                        if (( size > 100000000 ))
-                            then
-                                ((j=$j/4))
-                                if (( j == 0 ))
-                                    then
-                                        j=1
-                                fi
-                        fi
-                        ((p=$num/$j))                                                                                                   # calculate p by number of remaining reads and core to be used
-                        split -a 5 -d -l $p ${arbeitsvz}/restAcc.txt part-                                                                      # split file of remaining accno. by p lines
-                        for j in ${ziel}/Mapping2/part-*                                                                         # for each accession subset, do...
-                            do
-                                ${gsflxdir}/runMapping -o ${ziel}/Mapping2/map-`basename ${j}` -no -noace -nobam -noinfo -notrim -force -m -n -ml 95% -np -mi $identity -ud -cpu 24 -tr -fi ${j} ${line} ${arbeitsvz}/TrimmedReads.fastq  1>/dev/null & 
-                            done                                                                                # runMapping including only the subset against the organism ($line)
-                            wait 1>/dev/null 2>&1                                                               # and wait until all Mappings have finished
-                        for k in ${ziel}/Mapping2/map-part-*                                                                     # for each mapping directory, do...
-                            do  
-                                cat ${k}/454ReadStatus.txt >> ${ziel}/Mapping2/454ReadStatus.txt                      # get the ReadStatus of each subdirectory and cat it to on file in Mapping2
-                            done
-                    else                                                                                        # if you have less than 10000 reads left, just run the mapping with all reads
-                        ${gsflxdir}/runMapping -force -noace -nobam -noinfo -no -m -n -np -mi $identity -ml 95% -ud -cpu $threads -notrim -tr -o ${ziel}/Mapping2 -fi ${arbeitsvz}/restAcc.txt ${line} ${arbeitsvz}/TrimmedReads.fastq 1>/dev/null
-                        if [[ -s ${ziel}/Mapping2/454ReadStatus.txt ]]                                                  # if the mapping was successfull and a 454ReadStatus.txt exists, then ...
-                            then
-                            cp ${ziel}/Mapping2/454ReadStatus.txt .                                                     # copy it to Mapping2
-                        fi
-                fi
-                if [[ -s ${ziel}/Mapping2/454ReadStatus.txt ]]                                                                   # if you have a 454ReadStatus.txt in Mapping2 (Mapping was successful), then ...
-                    then
-                    get_mapping_results                                                                         # get the maaping results and assign them (see functions.sh)
-                fi
-            done < ${arbeitsvz}/references.txt
+                    i=`echo $line | sed 's/.*\///'`                                                                 # i is the reference without the whole path
+                    name=`echo "${line##*/}" | sed 's/.fna//'`                                                      # get name from line without the ending .fna
+                    organism=`basename $line`                                                                       # get organism as basename from line
+                    name2=`echo $name | sed 's/.*_//'`                                                              # get name2 by deleting TID-XXX_
+                    tid=`echo $name | sed 's/_.*//' | sed 's/.*-//' `                                               # extract TID from line
+                    ziel=${arbeitsvz}/${name}                                                                       # set working directory (combination of working directory and name)
+                    zielordner=${ziel}/Mapping2                                                                     # set new directory as Mapping2
+                    cd ${ziel}                                                                                      # change directory
+                    num=`wc -l < ${arbeitsvz}/restAcc.txt`                                                          # count number of remaining reads
+                    echo -ne "\n\nMapping again against $name2\n"                                                   # user info
+                    if (( $num > 20000 ))                                                                          # if more than 10000 reads are left, then ...
+                        then
+                            mkdir Mapping2                                                                          # create directory Mapping2
+                            cd Mapping2                                                                             # and change directory to Mapping2
+                            mem=`free -bt | tail -n 1 | cut -f 5 -d " "`                                                                    # get free memory
+                            size=`du -b $line | cut -f 1`                                                                               # get size of reference
+                            ((j=$mem/(2*$size)))                                                                                            # calculate how much mappings can be startet in parallel (twice the size because reads have to loaded and software needs memory itself)
+                            if (( $j > $threads ))                                                                                           # if more processes could be started than cores available, then ...
+                                then
+                                    j=$threads                                                                                              # set processes to start to cores available
+                            fi
+                            if (( size > 100000000 ))
+                                then
+                                    ((j=$j/4))
+                                    if (( j == 0 ))
+                                        then
+                                            j=1
+                                    fi
+                            fi
+                            ((p=$num/$j))                                                                                                   # calculate p by number of remaining reads and core to be used
+                            split -a 5 -d -l $p ${arbeitsvz}/restAcc.txt part-                                                                      # split file of remaining accno. by p lines
+                            for j in ${ziel}/Mapping2/part-*                                                                         # for each accession subset, do...
+                                do
+                                    echo "${gsflxdir}/runMapping -o ${ziel}/Mapping2/map-`basename ${j}` -no -noace -nobam -noinfo -notrim -force -m -n -ml 95% -np -mi $identity -ud -cpu 24 -tr -fi ${j} ${line} ${arbeitsvz}/TrimmedReads.fastq"
+                                    echo ${gsflxdir}/runMapping -o ${ziel}/Mapping2/map-`basename ${j}` -no -noace -nobam -noinfo -notrim -force -m -n -ml 95% -np -mi $identity -ud -cpu 24 -tr -fi ${j} ${line} ${arbeitsvz}/TrimmedReads.fastq
+                                    ${gsflxdir}/runMapping -o ${ziel}/Mapping2/map-`basename ${j}` -no -noace -nobam -noinfo -notrim -force -m -n -ml 95% -np -mi $identity -ud -cpu 24 -tr -fi ${j} ${line} ${arbeitsvz}/TrimmedReads.fastq  1>/dev/null &
+                                done                                                                                # runMapping including only the subset against the organism ($line)
+                                wait 1>/dev/null 2>&1                                                               # and wait until all Mappings have finished
+                            for k in ${ziel}/Mapping2/map-part-*                                                                     # for each mapping directory, do...
+                                do
+                                    cat ${k}/454ReadStatus.txt >> ${ziel}/Mapping2/454ReadStatus.txt                      # get the ReadStatus of each subdirectory and cat it to on file in Mapping2
+                                done
+                        else                                                                                        # if you have less than 10000 reads left, just run the mapping with all reads
+                            echo "${gsflxdir}/runMapping -force -noace -nobam -noinfo -no -m -n -np -mi $identity -ml 95% -ud -cpu $threads -notrim -tr -o ${ziel}/Mapping2 -fi ${arbeitsvz}/restAcc.txt ${line} ${arbeitsvz}/TrimmedReads.fastq"
+                            echo ${gsflxdir}/runMapping -force -noace -nobam -noinfo -no -m -n -np -mi $identity -ml 95% -ud -cpu $threads -notrim -tr -o ${ziel}/Mapping2 -fi ${arbeitsvz}/restAcc.txt ${line} ${arbeitsvz}/TrimmedReads.fastq
+                            ${gsflxdir}/runMapping -force -noace -nobam -noinfo -no -m -n -np -mi $identity -ml 95% -ud -cpu $threads -notrim -tr -o ${ziel}/Mapping2 -fi ${arbeitsvz}/restAcc.txt ${line} ${arbeitsvz}/TrimmedReads.fastq 1>/dev/null
+                            if [[ -s ${ziel}/Mapping2/454ReadStatus.txt ]]                                                  # if the mapping was successfull and a 454ReadStatus.txt exists, then ...
+                                then
+                                cp ${ziel}/Mapping2/454ReadStatus.txt .                                                     # copy it to Mapping2
+                            fi
+                    fi
+                    if [[ -s ${ziel}/Mapping2/454ReadStatus.txt ]]                                                                   # if you have a 454ReadStatus.txt in Mapping2 (Mapping was successful), then ...
+                        then
+                        get_mapping_results                                                                         # get the maaping results and assign them (see functions.sh)
+                    fi
+                 fi
+            done < ${arbeitsvz}/existing_references.txt
+            #done < ${arbeitsvz}/references.txt | xargs file | grep -v cannot | cut -f1 -d ':'
+        duration=$SECONDS
+        echo -ne "finished --> $(date)"
+        echo -ne "\nTotal time taken for mapping at lower cutoff was $(($duration / 60)) minutes and $(($duration % 60)) seconds."
+        echo -ne "\nTIMING $duration Mapping at lower cutoff\n"
 fi           
 
 echo -ne "$restreads\t$method\n" >> ${arbeitsvz}/report.txt                                                     # write restreads and mehtod to the report.txt
+
 ################################################################# Rest Assembly ##########################################################################
 
+SECONDS=0
+echo -ne "\n$(date) --> Assembling unassigned reads."
 . ${installdir}/Assembly-ContigBlast.sh                                                                         # start Assembly-ContigBlast.sh
 
 assfailcounter=0                                                                                                # set assfailcounter to 0 (possible values 0, 1 ,2 for more info see rndseqextract counter)
@@ -175,10 +193,17 @@ until (( ${assfailcounter} > 4 ))                                               
         let assfailcounter=assfailcounter+1                                                                     # count assfailcounter plus 1        
         . ${installdir}/Assembly-ContigBlast.sh                                                                 # start Assembly-ContigBlast.sh
     done
+duration=$SECONDS
+echo -ne "\n$(date) --> Completed assembly of unassigned reads."
+echo -ne "\nTotal time taken for assembling unassigned reads was $(($duration / 60)) minutes and $(($duration % 60)) seconds."
+echo -ne "\nTIMING $duration Assembling unassigned reads\n"
 echo -ne "$restreads\t$method\n" >> ${arbeitsvz}/report.txt
 
+
 ############################################################### Identify all Orgs and download sequences ###################################################
-echo -ne "Organisms identified within the final Assembly will be identified and reference sequences will be downloaded for Blastn vs all organisms.\n"                                          # user info
+
+SECONDS=0
+echo -ne "\n$(date) --> Organisms identified within the final Assembly will be identified and reference sequences will be downloaded for Blastn vs all organisms.\n"                                          # user info
 cut -f4 ${arbeitsvz}/asignedAcc.txt | sort | uniq > ${arbeitsvz}/uniq_tid.txt                                   # get all uniq taxids from asignedAcc.txt (all previous identified species)
 while read line                                                                                                 # while reading the uniq_tid.txt, do...
     do
@@ -187,14 +212,24 @@ while read line                                                                 
         if [[ `grep -w "$parentTax" ${arbeitsvz}/AnBlast.txt` == "" ]]                                          # if the found taxid is not already present in AnBlast.txt (all previous taxids are saved in the file), then ...
             then
                 . ${installdir}/TaxID-Sequenzisolation.sh                                                       # start SequenceIsolation.sh to get reference sequences
-                echo ${refseqdir}/TID-${parentTax}_$name.fna >> ${arbeitsvz}/references.txt                     # add the reference to references.txt
-                grep "^>" ${refseqdir}/TID-${parentTax}_$name.fna | cut -f2 -d "|" >> ${arbeitsvz}/Orgs_gis.txt
-                ln -s ${refseqdir}/TID-${parentTax}_$name.fna ${arbeitsvz}/DB/`basename ${refseqdir}/TID-${parentTax}_$name.fna`       #and set a link to the DB-directory     
+                if [ -z "$name" ]
+                    then
+                        echo -ne "\nNo name specified, therefore no additional sequences to download and use."
+                    else
+                        echo ${refseqdir}/TID-${parentTax}_$name.fna >> ${arbeitsvz}/references.txt                     # add the reference to references.txt
+                        grep "^>" ${refseqdir}/TID-${parentTax}_$name.fna | cut -f2 -d "|" >> ${arbeitsvz}/Orgs_gis.txt
+                        ln -s ${refseqdir}/TID-${parentTax}_$name.fna ${arbeitsvz}/DB/`basename ${refseqdir}/TID-${parentTax}_$name.fna`       #and set a link to the DB-directory
+                fi
         fi
     done < ${arbeitsvz}/uniq_tid.txt
+duration=$SECONDS
+echo -ne "\nTotal time taken for identification of all organisms and download of sequences was $(($duration / 60)) minutes and $(($duration % 60)) seconds."
+echo -ne "\nTIMING $duration Identification of all organisms and downloading of sequences\n"
 
 ################################################################## Rest Megablast #########################################################################
 
+SECONDS=0
+echo -ne "\n$(date) --> Megablast against nt database for unassigned reads."
 method=Megablast_vs_ntdb                                                                                        # set method (needed for output)
 
     ${gsflxdir}/fnafile -o ${arbeitsvz}/Ausgangsdateien/Megablast.fna -i ${arbeitsvz}/restAcc.txt ${arbeitsvz}/TrimmedReads.fasta    # write all unassigned reads into fasta-file
@@ -204,13 +239,22 @@ method=Megablast_vs_ntdb                                                        
     blastordner=${arbeitsvz}/MultiBlast/Megablast                                                               # define blast-folder  
     ntblast=megablast                                                                                           # set further parameters for blastn (e.g. set blast to megablast)
     . ${installdir}/Blast.sh                                                                                    # call blast.sh
-    getOutput                                                                                                   # get Output from blast and assign it to reads
+    getOutput
+duration=$SECONDS
+echo -ne "\nTotal time taken for Megablast of unassigned reads against nt database was $(($duration / 60)) minutes and $(($duration % 60)) seconds."
+echo -ne "\nTIMING $duration Megablast against nt database"                                                                                    # get Output from blast and assign it to reads
 echo -ne "$restreads\t$method\n" >> ${arbeitsvz}/report.txt
+
+
 ################################################################ Blastn vs Orgs #######################################################################
+
+SECONDS=0
+echo -ne "\n$(date) --> Blastn against identified organisms for unassigned reads."
 method=Blastn_vs_Organism                                                                                       # set method (needed for output)
 
     ${gsflxdir}/fnafile -o ${arbeitsvz}/Ausgangsdateien/Blastn-vs-orgs.fna -i ${arbeitsvz}/restAcc.txt ${arbeitsvz}/TrimmedReads.fasta    # write all unassigned reads into fasta-file
-    ${blastdir}/blastdb_aliastool -db ${ntdb} -gilist ${arbeitsvz}/Orgs_gis.txt -dbtype nucl -out ${arbeitsvz}/DB/AllOrgs.DB -title "AllOrgs"
+    ${blastdir}/blastdb_aliastool -db ${ntdb} -seqidlist ${arbeitsvz}/Orgs_gis.txt -dbtype nucl -out ${arbeitsvz}/DB/AllOrgs.DB -title "AllOrgs"
+    #${blastdir}/blastdb_aliastool -db ${ntdb} -gilist ${arbeitsvz}/Orgs_gis.txt -dbtype nucl -out ${arbeitsvz}/DB/AllOrgs.DB -title "AllOrgs"
     #cat ${arbeitsvz}/DB/TID-*.fna > ${arbeitsvz}/DB/AllOrgs.fna                                                # cat all previous identified organism-fasta fils into AllOrgs.fna
     blastvek=(0 db tax 0 0)                                                                                     # set blastvector for blast.sh
     query=${arbeitsvz}/Ausgangsdateien/Blastn-vs-orgs.fna                                                       # set query for blast
@@ -219,9 +263,15 @@ method=Blastn_vs_Organism                                                       
     ntblast=blastn                                                                                              # set further parameters for blastn (e.g. set blast to megablast)
     . ${installdir}/Blast.sh                                                                                    # call blast.sh
     getOutput                                                                                                   # get Output from blast and assign it to reads
-echo -ne "$restreads\t$method\n" >> ${arbeitsvz}/report.txt    
+duration=$SECONDS
+echo -ne "\nTotal time taken for Blastn of unassigned reads against identified organisms was $(($duration / 60)) minutes and $(($duration % 60)) seconds."
+echo -ne "\nTIMING $duration Blastn against identified organisms\n"
+echo -ne "$restreads\t$method\n" >> ${arbeitsvz}/report.txt
+
 #################################################################### Rest Blastn #########################################################################
 
+SECONDS=0
+echo -ne "\n$(date) --> Blastn against nt database."
 method=Blastn_vs_ntdb                                                                                           # set method (needed for output)
 
     ${gsflxdir}/fnafile -o ${arbeitsvz}/Ausgangsdateien/Blastn.fna -i ${arbeitsvz}/restAcc.txt ${arbeitsvz}/TrimmedReads.fasta   # write all unassigned reads into fasta-file
@@ -232,13 +282,16 @@ method=Blastn_vs_ntdb                                                           
     ntblast=blastn                                                                                              # set further parameters for blastn (e.g. set blast to blastn)
     . ${installdir}/Blast.sh                                                                                    # call blast.sh
     getOutput                                                                                                   # get Output from blast and assign it to reads
+duration=$SECONDS
+echo -ne "\nTotal time taken for Blastn against nt database was $(($duration / 60)) minutes and $(($duration % 60)) seconds."
+echo -ne "\nTIMING $duration Blastn against nt database\n"
 echo -ne "$restreads\t$method\n" >> ${arbeitsvz}/report.txt
 
 #################################################################### finish Analysis #########################################################################
-    
+
 restreads=`wc -l < ${arbeitsvz}/restAcc.txt`                                                                    # count lines of restAcc.txt to get number of unclassified reads
 
-echo -ne "\n $restreads reads couldn't be assigned\n"
+echo -ne "\n$(date) --> $restreads reads couldn't be assigned\n"
 
 if (( $restreads > 0 ))                                                                                         # if number of restReads is greater 0, then...
     then 
@@ -255,12 +308,12 @@ sort -n ${arbeitsvz}/famtax.txt | uniq | sed '/^$/d' > ${arbeitsvz}/uniq_famtax.
 while read line                                                                                                 # while reading uniq_famtax.txt
     do
         famtax=$line                                                                                            # assign line to famtax
-            if [[ $famtax == NA ]]                                                                              # if famtax is NA (no family found), then ...
-                then 
-                    echo "NA" >> ${arbeitsvz}/names.txt                                                         # print "NA" to names.txt, else ...
-                else
-                    grep "^\<$famtax\>" ${taxdir}/names.dmp | grep '\<scientific name\>' | cut -f3 >> ${arbeitsvz}/names.txt    # grep famtax in names.dmp and grep "scientific name" (3rd column) and write it to names.txt
-            fi
+        if [[ $famtax == NA ]]                                                                              # if famtax is NA (no family found), then ...
+            then
+                echo "NA" >> ${arbeitsvz}/names.txt                                                         # print "NA" to names.txt, else ...
+            else
+                grep "^\<$famtax\>" ${taxdir}/names.dmp | grep '\<scientific name\>' | cut -f3 >> ${arbeitsvz}/names.txt    # grep famtax in names.dmp and grep "scientific name" (3rd column) and write it to names.txt
+        fi
     done < ${arbeitsvz}/uniq_famtax.txt
 paste ${arbeitsvz}/uniq_famtax.txt ${arbeitsvz}/names.txt > ${arbeitsvz}/famtax_names.txt                       # paste famtax and names to get a table for the resultprotocol
 sort ${arbeitsvz}/asignedAcc.txt | uniq > ${arbeitsvz}/tmp.txt                                                  # sort and uniq all asigned Acc to avoid potential duplicates
@@ -275,7 +328,8 @@ newbler=`${gsflxdir}/newbler -version | head -n1`                               
 newblertail=`${gsflxdir}/newbler -version | head -n2 | tail -n1`                                                            # get newbler version (2nd row)
 catnewbler="$newbler $newblertail"                                                                              # cat both lines of newbler version to one line
 blastv=`${blastdir}/blastn -version | tail -n1`                                                                   # get blastversion
-blastdbv=`${blastdir}/blastdbcmd -db /home/blast_db/ncbi/nt -info | grep "Date" | cut -f1 | sed 's/Date: //g'`              # get version of blast database
+#blastdbv=`${blastdir}/blastdbcmd -db /home/blast_db/ncbi/nt -info | grep "Date" | cut -f1 | sed 's/Date: //g'`              # get version of blast database
+blastdbv=`${blastdir}/blastdbcmd -db ${BLASTDB}/${ntdb} -info | grep "Date" | cut -f1 | sed 's/Date: //g'`              # get version of blast database
 texversion=`${latexdir}/tex --version | head -n 1`
 
 export arbeitsvz                                                                                                # export variables to use in R to create resultprotocol
@@ -290,9 +344,10 @@ export texversion
 cd $arbeitsvz                                                                                                   # change bask to working directory
 
 ############################################# Create resultprotocol ################################################################################
+
 echo "Construct: *.txt" >> zeiten.log                                                                           # save info
 date >> zeiten.log                                                                                              # save date
-${R}/Rscript --vanilla ${scriptR} 12 &>>${arbeitsvz}/console.log                                                # run R script to get result tables (see resultprotocol.R)
+${R}/Rscript --vanilla ${scriptR} #12 &>>${arbeitsvz}/console.log                                                # run R script to get result tables (see resultprotocol.R)
 wait                                                                                                            # wait until R anaylsis has finished
 date >> zeiten.log                                                                                              # save date
 
@@ -303,12 +358,12 @@ echo ${arbeitsvz}/TID*/MappingFiles/map-part* | xargs rm -r                     
 rm -r ${arbeitsvz}/DB/                                                                                          # |   
 rm -r ${arbeitsvz}/D*Mapping/                                                                                   # |           
 #rm -r ${arbeitsvz}/MultiBlast/Blastn-vs-Orgs/DB                                                                 # V                           
-echo -ne "Done\n"                                                                                               # user info
+echo -ne "Done\nCompleted basic analysis --> $(date)"                                                                                               # user info
 #furtherAnalysis=y                                                                                           
 if [[ $furtherAnalysis == y ]]                                                                                  # if a further analysis should be performed, then ...
     then
         echo -ne "--- START OF FURTHER ANALYSIS ---\n"                                                          # user info
-        echo -ne "Subsequently, the result report will be updated\n"                                            # user info
+        echo -ne "$(date) --> Subsequently, the result report will be updated\n"                                            # user info
 
         . ${installdir}/furtherAnalysis.sh                                                                  # run further anaylsis 
 fi
