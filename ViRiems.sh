@@ -1,3 +1,5 @@
+#!/bin/bash
+
 #    ViRiems.sh - part of RIEMS - Reliable Information Extraction from MEtagenomic Sequence datasets
 #    Copyright (C) 2009-2014  Matthias Scheuch, Dirk Hoeper
 #
@@ -16,7 +18,6 @@
 
 
 
-#!/bin/bash
 
 echo -ne "\nViRIEMS workflow was started.\nAll sequences will be first screened against a virus database. The whole RIEMS analysis will be started, subsequently."
 method=ViRIEMS

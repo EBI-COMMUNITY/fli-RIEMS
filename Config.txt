@@ -22,21 +22,24 @@
 
 
 ########################################## Software paths
-gsflxdir=path-name/454_3.0/bin/                                     # directory containg all GS FLX applications (e.g. sfffile, runAssembly etc.)
-installdir=path-name/RIEMS/                                         # install directory containing all 'RIEMS' subtools (e.g. TrimSff.sh etc.)
-embossdir=path-name/emboss/bin/                                     # directory containg all Emboss software applications (e.g. sixpack etc.)
-blastdir=path-name/ncbi-blast-2.4.0+/bin/                           # directory containg all BLAST software applications (e.g. blastn, makeblastdb etc.)
-R=/usr/lib64/R/bin/                                                 # path to R
-latexdir=/usr/bin/                                                  # path to Latex
+gsflxdir=/hps/nobackup/nucleotide/rahman/development/fli-RIEMS/454_3.0/bin                                     # directory containg all GS FLX applications (e.g. sfffile, runAssembly etc.)
+installdir=/hps/nobackup/nucleotide/rahman/development/fli-RIEMS                                         # install directory containing all 'RIEMS' subtools (e.g. TrimSff.sh etc.)
+embossdir=/homes/blaise/scripts/bin                                     # directory containg all Emboss software applications (e.g. sixpack etc.)
+blastdir=/hps/nobackup/nucleotide/rahman/development/ncbi-blast-2.7.1+/bin                           # directory containg all BLAST software applications (e.g. blastn, makeblastdb etc.)
+R=/usr/lib64/R/bin                                                 # path to R
+latexdir=/usr/bin                                                  # path to Latex
 
 
 ########################################## Database paths
-BLASTDB=path-name/ncbi/                                             # path to blastdbs
+BLASTDB=/hps/nobackup/nucleotide/blaise/selecta/blastDB/dbs/                                             # path to blastdbs
+#BLASTDB=/hps/nobackup/nucleotide/rahman/development/blast_db_Is/ncbi
 export BLASTDB                                                      # export path to blastdbs
-ntdb=nt                                                             # BLAST nucleotide database
-protdb=nr                                                           # BLAST non redundant database
-taxdir=path-name/taxonomy                                           # directory containing BLAST '.dmp' files (e.g. names.dmp, gi_taxid_nucl.dmp etc.)
-fasttaxid=path-name/taxLok                                          # directory containing viral database (automatically created after each BLAST db update)
+ntdb=genomic/Salmonella_genomic.fna                                                             # BLAST nucleotide database
+#ntdb=nt
+protdb=protein/Salmonella_protein.faa
+#protdb=nr                                                           # BLAST non redundant database
+taxdir=/hps/nobackup/nucleotide/rahman/development/blast_db_Is/taxonomy                                           # directory containing BLAST '.dmp' files (e.g. names.dmp, gi_taxid_nucl.dmp etc.)
+fasttaxid=/hps/nobackup/nucleotide/rahman/development/blast_db_Is/taxLok                                          # directory containing viral database (automatically created after each BLAST db update)
 fasttaxidntdb=$fasttaxid/gi_taxid_nucl/gi_taxid_nucl                # database for fast nucl gi -> taxid assignment | (automatically created 
 fasttaxidprotdb=$fasttaxid/gi_taxid_prot/gi_taxid_prot              # database for fast prot gi -> taxid assignment V after each BLAST db update)
 refseqdir=$installdir/RefSequenzen                                  # optional: directory containing downloaded references during analyses
