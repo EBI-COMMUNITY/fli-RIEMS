@@ -90,8 +90,15 @@ if [[ -z $projektname ]]                                                        
         projektname=`echo $projektname | sed 's/_/-/g'`                                                         # else tkae projectname and substitut "_" by "-" ("_" makes problems in final latex skript)
 fi
 arbeitsvz=${outputordner}/${projektname}                                                                        # define working directory with outputfolder and project
-    
-if [ -d ${arbeitsvz} ]  
+
+
+if [ -d ${arbeitsvz} ]      # If the working directory already exists, delete it
+    then
+        rm -r ${arbeitsvz}
+fi
+
+
+if [ -d ${arbeitsvz} ]
     then                                                                                                        # if working directory already exists
         echo -e "\n\nThere is already a Folder named '${arbeitsvz}' in your current output directory."          # show info to user and exit program
     #    echo -e "Please delete or rename this Folder and start the analysis again.\n" ; exit
