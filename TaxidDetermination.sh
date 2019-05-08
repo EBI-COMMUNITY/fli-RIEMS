@@ -1,5 +1,3 @@
-#!/bin/bash
-
 #    TaxidDetermination.sh - part of RIEMS - Reliable Information Extraction from Metagenomic Sequence datasets
 #    Copyright (C) 2009-2016  Ariane Belka, Maria Jenckel, Matthias Scheuch, Dirk Hoeper
 #
@@ -17,12 +15,14 @@
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
+#!/bin/bash
 
 function get_species() {
 taxid=$tid                                                                                                  # assign tid to taxid (basically the same)
 isSpecies=FALSE                                                                                             # set isSpecies to FALSE to start with
-while [[ ${isSpecies} != TRUE ]]                                                                            # as long as $isSpecies is false, do ...                                       
-    do                          
+
+while [[ ${isSpecies} != TRUE ]]                                                                            # as long as $isSpecies is false, do ...
+    do
         taxTemp=`grep "^\<${taxid}\>" ${taxdir}/nodes.dmp`                                                  # retrieve the line with information on the current TAX-ID from the nodes.dmp database
         if (( `echo ${taxTemp} | grep -wc "species"` > 0 ))                                                 # if taxonomy level of the current TAX-ID is species, then ...
             then                                                                                          
@@ -32,7 +32,7 @@ while [[ ${isSpecies} != TRUE ]]                                                
                 taxid=$tid                                                                                  # set taxid back to tid
                 isSpecies=TRUE                                                                              # and leave if an while loop
         elif [[ -z $taxTemp ]]                                                                              # is taxTemp is empty, then ...
-            then    
+            then
                 break                                                                                       # leave loop
         else                            
             taxid=`echo ${taxTemp} | cut -d "|" -f2 | tr -d [:blank:]`                                      # then retrieve parent-TAX-ID (parent in column 2 -> cut -f2)
@@ -237,9 +237,9 @@ famtax=NA
 sktax=NA
 isFamily=FALSE                                                                                              # set isFamily to FALSE to start with until loop
 isSK=FLASE                                                                                                  # set isSK to FALSE to start with until loop
-until [[ ${isFamily} == TRUE ]] && [[ ${isSK} == TRUE ]]                                                    # until $isSFamily and $isSK are TRUE, do ...                                       
-    do                      
-        
+
+until [[ ${isFamily} == TRUE ]] && [[ ${isSK} == TRUE ]]                                                    # until $isSFamily and $isSK are TRUE, do ...
+    do
         taxTemp=`grep "^\<${taxid}\>" ${taxdir}/nodes.dmp`                                                  # retrieve the line with information on the current TAX-ID from the nodes.dmp database
         if (( `echo ${taxTemp} | grep -wc "\<family\>"` > 0 ))                                              # check how often you can grep "family" for current Tax-id and if it more 0 times, then ...
             then                                                                                            
@@ -251,8 +251,8 @@ until [[ ${isFamily} == TRUE ]] && [[ ${isSK} == TRUE ]]                        
                 sktax=`echo ${taxTemp} | cut -d "|" -f1 | tr -d [:blank:]`                                  # get sktax from first column of taxTemp
                 taxid=`echo ${taxTemp} | cut -d "|" -f2 | tr -d [:blank:]`                                  # set taxid to second column of taxTemp
                 isSK=TRUE                                                                                   # and set isSK to TRUE (so that part for until loop is TRUE)
-        elif (( $taxid == 1 ))                                                                              # else if tax-id is 1 (reached root), then ...
-            then                        
+        elif (( ${taxid} == 1 ))                                                                              # else if tax-id is 1 (reached root), then ...
+            then
                 famtax=NA                                                                                   # set famtax to NA (no family found in tax-tree)
                 isFamily=TRUE                                                                               # and set isFamily=TRUE (otherwise until loop cannot be left)
                 isSK=TRUE

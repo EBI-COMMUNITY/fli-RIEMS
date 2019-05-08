@@ -35,9 +35,14 @@ case "$mbcr" in                                                                 
         #${blastdir}/blastn -db $ntdb -num_threads $threads -evalue $evalue -max_hsps 1 -max_target_seqs 1 -negative_gilist ${installdir}/gi_exclude.txt -out ${multiblastdir}/Blast-Hits.txt -query ${multiblastdir}/454AllContigs.fna -outfmt '6 qseqid sseqid pident staxid qcovs'    # blast contigs and get query-id and hit-id tab-seperated
         ${blastdir}/blastn -db $ntdb -num_threads $threads -evalue $evalue -max_hsps 1 -max_target_seqs 1 -out ${multiblastdir}/Blast-Hits.txt -query ${multiblastdir}/454AllContigs.fna -outfmt '6 qseqid sseqid pident staxid qcovs'    # blast contigs and get query-id and hit-id tab-seperated
 
+
         awk '$5 > 70' ${multiblastdir}/Blast-Hits.txt > ${multiblastdir}/sorted-Hits.txt
         cut -f1-4 ${multiblastdir}/sorted-Hits.txt > ${multiblastdir}/Blast-Hits.txt
-        
+
+        #awk '{sub("N/A", "NA", $4);print}' ${multiblastdir}/Blast-Hits.txt > ${multiblastdir}/non-NA.txt     # Substitute N/A with NA
+        awk '$4 != "N/A"' ${multiblastdir}/Blast-Hits.txt > ${multiblastdir}/non-NA.txt
+        mv ${multiblastdir}/non-NA.txt ${multiblastdir}/Blast-Hits.txt
+
         if ! [ -s ${multiblastdir}/Blast-Hits.txt ]                                                                     # if Blast-Hits.txt is empty, then ...
             then 
                 rm ${multiblastdir}/454AllContigs.fna                                                                   # delete 454AllContigs.fna
@@ -77,7 +82,10 @@ case "$mbcr" in                                                                 
         
         awk '$5 > 70' ${arbeitsvz}/MultiBlast/RndReads/Blast-Hits.txt > ${arbeitsvz}/MultiBlast/RndReads/sorted-Hits.txt
         cut -f1-4 ${arbeitsvz}/MultiBlast/RndReads/sorted-Hits.txt > ${arbeitsvz}/MultiBlast/RndReads/Blast-Hits.txt
-        
+
+        awk '$4 != "N/A"' ${arbeitsvz}/MultiBlast/RndReads/Blast-Hits.txt > ${arbeitsvz}/MultiBlast/RndReads/non-NA.txt     # Remove N/A hits
+        mv ${arbeitsvz}/MultiBlast/RndReads/non-NA.txt ${arbeitsvz}/MultiBlast/RndReads/Blast-Hits.txt
+
         # megablast of random reads vs nucleotid database
         cd ${arbeitsvz}/MultiBlast/RndReads
         if [ -s ${multiblastrnddir}/Blast-Hits.txt ]                                                                    # if Blast-Hits.txt exists and is not empty, then ...

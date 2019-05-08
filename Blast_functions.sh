@@ -1,5 +1,3 @@
-#!/bin/bash
-
 #    Blast_functions.sh - part of RIEMS - Reliable Information Extraction from Metagenomic Sequence datasets
 #    Copyright (C) 2009-2016  Ariane Belka, Maria Jenckel, Matthias Scheuch, Dirk Hoeper
 #
@@ -17,10 +15,15 @@
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
+#!/bin/bash
+
 function sortBlastResults()
 {
 awk '$9 > 70' Hits.txt > sorted-Hits.txt
 mv sorted-Hits.txt Hits.txt
+
+awk '$8 != "N/A"' Hits.txt > non-NA.txt     # Remove hits that did not present with a taxonomic ID
+mv non-NA.txt Hits.txt
 }
 
 function BlastHitTaxid() 

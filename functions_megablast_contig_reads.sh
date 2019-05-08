@@ -37,6 +37,14 @@ function contigs_to_tid() {                                                     
     rm tmp.txt                                                                                  # remove tmp-file
     }
 
+function scaffolds_to_tid() {
+    # Function resulting in file containing only scaffold name and taxonomic ID found for it (similar to function above)
+    cut -f1 Blast-Hits.txt > scaffold_order.txt
+    cut -f2 tid.txt > tmp.txt
+    paste scaffold_order.txt tmp.txt > scaffold_tid.txt
+    rm tmp.txt
+}
+
 function reads_to_tid() {                                                                       # functions to assign contigs to tids
     cut -f1,3 Blast-Hits.txt > reads_order.txt                                                  # cut first and 3rd column to get read names and order
     cut -f2 tid.txt > tmp.txt                                                                   # cut second column of tid to get tid
@@ -76,7 +84,7 @@ function assign_reads() {                                                       
                                     printf "${method}\t${sktax}\t${famtax}\t${tid}\t${name}\t${ident}\n%.0s" $(seq 1 $length) > ${num}_tmp1.txt    # print length-times basic info for asignedAcc.txt
                                     paste ${num}_tmp1.txt ${num}.txt > info_${num}.txt                         # and combine basic info with read-info
                             fi
-                        done < $i & 
+                        done < $i &
                 done
             wait
             cat info* > assembledReads.txt                                                      # combine all assigned Reads into one file
@@ -87,6 +95,14 @@ function assign_reads() {                                                       
             echo -ne "\n\n$assigned could be assigned within the assembly\n                     
             and $restreads are left\n"                                                          # user info
             #rm info* 1>/dev/null 2>&1
+    fi
+}
+
+function assign_reads_to_scaffold(){
+    # Map the reads to the scaffold and therefore a specific taxonomic ID (and organism)
+    if [[ -s scaffold_tid.txt ]]
+        then
+            linenum=`wc -l < scaffold_tid.txt`
     fi
 }
 
@@ -107,7 +123,7 @@ function assign_rnd_reads() {
                     while read line                                                             # while reading the contig_tid.txt, do ...
                         do
                             tid=$line                                                           # get taxid (2nd column)
-                            get_species                                                         # get species tid
+                            get_species                                                         # get species tid by querying nodes.dmp file for species name
                             FamSkTaxDetermination                                               # get superkingdom- and family-tid
                             if [[ `grep -w "^${tid}" ${taxdir}/names.dmp | grep '\<scientific name\>'` != "" ]]          # if "scientific name" for taxid can be grepped and is not an empty string, then ...
                                 then
@@ -191,7 +207,7 @@ function get_tid_read() {
                 then 
                     echo -ne "following Tax-IDs will be further used:  \n"                      # user info
                     cat Tax-Count-bigger10.txt                                                  # about tax-ids
-                    mv Tax-Count-bigger10.txt uniq-tids.txt                                     # and move Tax-Count-bigger10.txt to uniq-tids.txt
+                    mv Tax-Count-bigger10.txt uniq-tids.txt                                     # and move Tax-Count-bigger10.txt to uniq-tids.txt (more popular tax IDs)
                     identity=97                                                                 # set identity to assign reads
                     method=Mapping                                                              # set method to assign reads
                     asign_to_tid                                                                # to assign reads to tax-id (see above)

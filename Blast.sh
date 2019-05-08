@@ -77,6 +77,9 @@ elif [[ $ntblast == tblastx ]]                                                  
         if [[ $method != Blastn_vs_ntdb ]]
             then
                 sortBlastResults
+            else
+                awk '$8 != "N/A"' Hits.txt > non-NA-Blastn.txt     # Remove hits that did not present with a taxonomic ID
+                mv non-NA-Blastn.txt Hits.txt
         fi
 fi
 ############################# probably not of use anymore ##############################

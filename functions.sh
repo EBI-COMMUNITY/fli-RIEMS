@@ -98,7 +98,7 @@ while (( ${restreads} > $cutoffAssembly && rndseqextract < 2 )) || [[ ! -s ${arb
         mappingdir=${arbeitsvz}/assembly
 
         ######### ADDITION
-        #spec=`date +%k%M%S`
+        #spec=$(date +%k%M%S)
         #foldername=assembly_${spec}
         #mkdir ${arbeitsvz}/${foldername}
         #cp -r ${mappingdir} ${arbeitsvz}/${foldername}
@@ -106,7 +106,7 @@ while (( ${restreads} > $cutoffAssembly && rndseqextract < 2 )) || [[ ! -s ${arb
 
         cd ${mappingdir}                                                                                                    # change directory
     if [ -s ${mappingdir}/454AllContigs.fna ]                                                                               # if assembly was successful and contigs are available, then ...
-        then            
+        then
             cut -f1-3 ${mappingdir}/454ReadStatus.txt > ${mappingdir}/454ReadInfo.txt           
             grep "contig" ${mappingdir}/454ContigGraph.txt | cut -f2- > ${mappingdir}/contigGraph.txt                       # get all contigs from contigGraph.txt and delete first column
             csplit -s ${mappingdir}/454AllContigs.fna /\>/ {*} -f "contig-" -n 5 -z -q                                      # split the 454AllContigs-file at the header so each contig is in a seperate file
@@ -151,7 +151,7 @@ while (( ${restreads} > $cutoffAssembly && rndseqextract < 2 )) || [[ ! -s ${arb
                     
     rm ${arbeitsvz}/assembly/contig*                                                                                        # delete all files in the assembly folder
     cd ${arbeitsvz}/Ausgangsdateien                                                                                         # change directory
-    #rm -r ${arbeitsvz}/assembly                                                                                             # remove the assembly directory
+    rm -r ${arbeitsvz}/assembly                                                                                             # remove the assembly directory
 done 
 }   
 

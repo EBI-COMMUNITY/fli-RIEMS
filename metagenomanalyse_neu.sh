@@ -212,7 +212,9 @@ while read line                                                                 
         if [[ `grep -w "$parentTax" ${arbeitsvz}/AnBlast.txt` == "" ]]                                          # if the found taxid is not already present in AnBlast.txt (all previous taxids are saved in the file), then ...
             then
                 . ${installdir}/TaxID-Sequenzisolation.sh                                                       # start SequenceIsolation.sh to get reference sequences
-                if [ -z "$name" ]
+                seq=${refseqdir}/TID-${parentTax}_$name.fna
+                # if [ -z "$name" ]       # If there is no name of organism, no sequence file available
+                if [ -f "$seq" ]
                     then
                         echo -ne "\nNo name specified, therefore no additional sequences to download and use."
                     else
@@ -244,7 +246,6 @@ duration=$SECONDS
 echo -ne "\nTotal time taken for Megablast of unassigned reads against nt database was $(($duration / 60)) minutes and $(($duration % 60)) seconds."
 echo -ne "\nTIMING $duration Megablast against nt database"                                                                                    # get Output from blast and assign it to reads
 echo -ne "$restreads\t$method\n" >> ${arbeitsvz}/report.txt
-
 
 ################################################################ Blastn vs Orgs #######################################################################
 
