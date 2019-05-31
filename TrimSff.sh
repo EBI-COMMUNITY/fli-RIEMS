@@ -36,8 +36,7 @@ while (( $i < 1 ))
         
         if [[ -n ${illumina_input} ]]    
             then
-                echo "Processing illumina"
-                echo ${gsflxdir}/runMapping -force -m -cpu ${threads} -ud -np -no -tr -mi 100 -ml 100 -vt ${il_adapter} -o ${arbeitsvz}/Dil-Mapping ${referenz_trimming} ${illumina_input[@]} 1>/dev/null  # Dummy-Mapping Illumina
+                #echo "${gsflxdir}/runMapping -force -m -cpu ${threads} -ud -np -no -tr -mi 100 -ml 100 -vt ${il_adapter} -o ${arbeitsvz}/Dil-Mapping ${referenz_trimming} ${illumina_input[@]} 1>/dev/null"  # Dummy-Mapping Illumina
                 ${gsflxdir}/runMapping -force -m -cpu ${threads} -ud -np -no -tr -mi 100 -ml 100 -vt ${il_adapter} -o ${arbeitsvz}/Dil-Mapping ${referenz_trimming} ${illumina_input[@]} 1>/dev/null  # Dummy-Mapping Illumina
         fi #Quality Mapping of Illumina data input with adapter trimming
         
@@ -73,14 +72,14 @@ if (( $i > 0 ))                                                                 
         printf 'low quality\n%.0s' $(seq 1 $i) > ${arbeitsvz}/tmp1.txt                                  # write "low quality" for each low quality read
         printf '\t\t\t\t\t\n%.0s' $(seq 1 $i) > ${arbeitsvz}/tmp3.txt                                   # columns have to be added to extend list with further results of mapping and blast
         paste ${arbeitsvz}/tmp3.txt ${arbeitsvz}/trimmedAcc.txt ${arbeitsvz}/tmp1.txt > ${arbeitsvz}/tmp2.txt   #paste temporary files and trimmed Accnos
-        mv ${arbeitsvz}/tmp2.txt ${arbeitsvz}/asignedAcc.txt                                            # move tmp2 to asignedAcc.txt
+        #mv ${arbeitsvz}/tmp2.txt ${arbeitsvz}/asignedAcc.txt                                            # move tmp2 to asignedAcc.txt
+        cat ${arbeitsvz}/tmp2.txt >> ${arbeitsvz}/asignedAcc.txt
         rm ${arbeitsvz}/tmp1.txt ${arbeitsvz}/tmp3.txt                                                  # and delete temporary files
 fi
 
 duration=$SECONDS
 echo "finished --> $(date)"                                                                                         # user info
-echo -ne "\nTotal time taken for quality and adapter trimming was $(($duration / 60)) minutes and $(($duration % 60)) seconds."
-echo -ne "\nTIMING $duration Initial trimming"
+echo -ne "\nSTAGE TIMING $duration Initial trimming"
 
 
 

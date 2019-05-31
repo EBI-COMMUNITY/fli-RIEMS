@@ -36,9 +36,10 @@ RIEMS 4.0 Workflow started at `date`\n\n"                                       
 resultprotocol=y
 furtherAnalysis=n
 viriems=n
+embl_ebi=n
 unset projektname
 unset arbeitsvz
-while getopts f:p:o:j:i:t:x:r:v: opt 2>/dev/null                                                                # input options
+while getopts f:p:o:j:i:t:x:r:v:e: opt 2>/dev/null                                                                # input options
     do                                                                                                          
         case ${opt} in                                                                                          # get input parameters
             o)                              
@@ -59,7 +60,9 @@ while getopts f:p:o:j:i:t:x:r:v: opt 2>/dev/null                                
                 resultprotocol=$OPTARG;;
             v)  
                 viriems=$OPTARG;;
-            *)                                                                                                  # at unvalid input                                                                                                                        
+            e)
+                embl_ebi=$OPTARG;;
+            *)                                                                                                  # at unvalid input
                 cat ${installdir}/input_info.txt                                                                # show info and 
                 exit;;                                                                                          # exit program                                                                                     
         esac                            
@@ -111,6 +114,7 @@ if [ -d ${arbeitsvz} ]
         touch ${arbeitsvz}/TrimStatus.txt                                                                       # create empty TrimStatus-file
         touch ${arbeitsvz}/asignedAcc.txt                                                                       # create empty file for assigned Reads
         touch ${arbeitsvz}/report.txt
+        touch ${arbeitsvz}/identifiedTaxClassifications.txt                                                     # create empty file for taxonomic information
         for i in ${input[*]}                                                                                    # for each element in tax, do ...
            do  
                echo $i | sed 's/.*\///g' | sed 's/\.[^\.]*$//' | sed 's/_/-/g' >> ${arbeitsvz}/input.txt        # write all input-file names in one file to use later in R
@@ -155,10 +159,16 @@ if [[ -n ${tax} ]]                                                              
         rm ${arbeitsvz}/tmp.txt                                                                                 # remove temporary file
 fi  
 
-if ! [[ -s ${installdir}/gi_exclude.txt ]]                                                                      # check if there is already exists a list of gis to exclude from blast analysis, if not then...
+if [[ ${embl_ebi} == y ]]
     then
-        . ${installdir}/TaxID_exclude.sh                                                                        # start TaxID_exclude.sh to create that list
+        echo -ne "\nRIEMS workflow will include an initial read trimming, scaffold assembly and BLAST stage developed by EMBL-EBI."
+    else
+        echo -ne "\nStandard RIEMS workflow will be run."
 fi
-echo -ne "For progress please check ${arbeitsvz}/progress.log.\n\n"                                             # user info
 
+#if ! [[ -s ${installdir}/gi_exclude.txt ]]                                                                      # check if there is already exists a list of gis to exclude from blast analysis, if not then...
+#    then
+#        . ${installdir}/TaxID_exclude.sh                                                                        # start TaxID_exclude.sh to create that list
+#fi
+echo -ne "\n\nFor progress please check ${arbeitsvz}/progress.log.\n\n"                                             # user info
 . ${installdir}/metagenomanalyse_neu.sh 1>${arbeitsvz}/progress.log 2>${arbeitsvz}/error.log                    # start metagenomic workflow and save errors in error.log and terminal output in progress.log

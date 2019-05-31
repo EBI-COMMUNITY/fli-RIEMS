@@ -42,16 +42,19 @@ function BlastHitTaxid()
     
     if [[ $method == Blastn_vs_Organism ]]                                                                  # if the method was Blast vs Organisms, then ...
         then
-            cut -f2-4 ${arbeitsvz}/asignedAcc.txt | sort | uniq > skfamtax.txt                              # cut column 2-4 of assigned Reads to get all previous identified taxids (faster)
+            #cut -f2-4 ${arbeitsvz}/asignedAcc.txt | sort | uniq > skfamtax.txt                              # cut column 2-4 of assigned Reads to get all previous identified taxids (faster)
             for i in tid_part-*                                                                             # for each taxid-file, do ...
                 do
                     while read line                                                                         # while reading each file per line, do ....
-                        do 
+                        do
                             tid=`echo $line`                                                                # assign line to tid
+                            taxInfoCheck=`grep -m 1 "${tid}$" ${arbeitsvz}/identifiedTaxClassifications.txt`
                             #gi=`echo $line | cut -d " " -f1`
                             get_species                                                                     # and get species-tid for tid (TaxidDetermination.sh)
-                            sktax=`grep -w "${tid}$" $blastordner/skfamtax.txt | cut -f 1`                  # grep species-tid in previous found taxids and get sktax (1st column)
-                            famtax=`grep -w "${tid}$" $blastordner/skfamtax.txt | cut -f 2`                 # and famtax (2nd column)
+                            sktax=`echo ${taxInfoCheck} | awk '{ print $1 }'`
+                            famtax=`echo ${taxInfoCheck} | awk '{ print $2 }'`
+                            #sktax=`grep -w "${tid}$" $blastordner/skfamtax.txt | cut -f 1`                  # grep species-tid in previous found taxids and get sktax (1st column)
+                            #famtax=`grep -w "${tid}$" $blastordner/skfamtax.txt | cut -f 2`                 # and famtax (2nd column)
                             echo -ne "${line}\t${tid}\t${famtax}\t${sktax}\n" >> ${i}-tid-fam-sk-tax.txt    # write results tabseperated to file
                         done < $i &                                                                         # Fuktionsaufruf FamSkTaxDetermination + thread verteilung
                 done ; wait
@@ -62,17 +65,25 @@ function BlastHitTaxid()
                     while read line                                                                         # while reading each file per line, do ....
                     do 
                         tid=`echo $line`                                                                    # assign line to tid
-                        get_species                                                                         # get species-tid for tid (TaxidDetermination.sh)
-                        FamSkTaxDetermination $tid                                                          # and determine sk and famtax (TaxidDetermination.sh)
+                        taxInfoCheck=`grep -m 1 "${tid}$" ${arbeitsvz}/identifiedTaxClassifications.txt`
+
+                        if [[ "${taxInfoCheck}" != "" ]]
+                            then
+                                sktax=`echo ${taxInfoCheck} | awk '{ print $1 }'`
+                                famtax=`echo ${taxInfoCheck} | awk '{ print $2 }'`
+                            else
+                                get_species                                                                         # get species-tid for tid (TaxidDetermination.sh)
+                                FamSkTaxDetermination $tid                                                          # and determine sk and famtax (TaxidDetermination.sh)
+                        fi
                     done < $i &                                                                             # Fuktionsaufruf FamSkTaxDetermination + thread verteilung
                 done ; wait
                 cat tid_part-*-tid-fam-sk-tax.txt >> tid-fam-sk-tax.txt
     fi
     
     (while read line 
-        do                                                                                                  # line: Gi's
+        do
             echo -e "`grep "^\<${line}\>" $blastordner/tid-fam-sk-tax.txt 2>/dev/null `" >> tid-fam-sk-tax-ununiq.txt
-        done < tid.txt & wait)
+        done < tid.txt & wait)                                                                              # line: Gis
     sort -n tid-fam-sk-tax-ununiq.txt | cut -f2- > tmp.txt                                                  # numerische Sortierung nach der 1. Spalte (gis)
     paste AllHits.txt tmp.txt > AllHits-TaxID-${rank}TaxID.txt                                              # spaltenweise Verknüpfung der beiden Dateien
     

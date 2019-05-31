@@ -70,6 +70,8 @@ elif [[ $ntblast == tblastx ]]                                                  
         #$blastdir/tblastx -db $referenz -num_threads $threads -negative_gilist ${installdir}/gi_exclude.txt -evalue $evalue -max_target_seqs 1 -out $blastordner/Hits.txt -query $query -max_hsps 1 -outfmt '6 qseqid sseqid qstart qend qlen evalue pident staxid'
         # perform tblastx; negative gilist includes gis for environment samples and synthetic constructs, max_target_seqs and max_hsps have to be set to 1 to get only one result per sequence; output="tab-seperated(6) query sequence id; subtject sequence id; query start; query end; query length; evalue; identity; taxid"
     else                                                                                                            # otherwise, ...
+        START_BLAST=$(date +%s)
+        echo -ne "\n[`date`] Actual blast command and sorting of blast output."
         $blastdir/blastn -task $ntblast -db $referenz -num_threads $threads -evalue $evalue -max_target_seqs 1 -out $blastordner/Hits.txt -query $query -max_hsps 1 -outfmt '6 qseqid sseqid qstart qend qlen evalue pident staxid qcovs'
         #$blastdir/blastn -task $ntblast -db $referenz -negative_gilist ${installdir}/gi_exclude.txt -num_threads $threads -evalue $evalue -max_target_seqs 1 -out $blastordner/Hits.txt -query $query -max_hsps 1 -outfmt '6 qseqid sseqid qstart qend qlen evalue pident staxid qcovs'
         # perform blastn (megablast depending on -task); negative gilist includes gis for environment samples and synthetic constructs, max_target_seqs and max_hsps have to be set to 1 to get only one result per sequence; output="tab-seperated(6) query sequence id; subtject sequence id; query start; query end; query length; evalue; identity; taxid"
@@ -81,10 +83,13 @@ elif [[ $ntblast == tblastx ]]                                                  
                 awk '$8 != "N/A"' Hits.txt > non-NA-Blastn.txt     # Remove hits that did not present with a taxonomic ID
                 mv non-NA-Blastn.txt Hits.txt
         fi
+        END_BLAST=$(date +%s)
+        DIFF_BLAST=$(( $END_BLAST - $START_BLAST ))
+        echo -ne "\nTIMING\t${DIFF_BLAST}\tActual blast command and sorting of blast output"
 fi
 ############################# probably not of use anymore ##############################
 
-echo -ne "Data processing... "                                                                                      # user info
+echo -ne "\nData processing... "                                                                                      # user info
 
 if [[ $method == Blastp_vs_protdb ]]                                                                                # if the method is a blastp, then ...
     then
@@ -102,7 +107,12 @@ cat $blastordner/Hits.txt | sort -n -t$'\t' -k 8 | grep -vw "NoHit" | cut -f1-7 
 
 if [ -s $blastordner/AllHits.txt ]                                                                                  # if the AllHits.txt file exists (blast was successful), then ...
     then                                                                                                        
+        START_BPROC=$(date +%s)
+        echo -ne "\n[`date`] Post processing AllHits.txt."
         BlastHitTaxid                                                                                               # process data (see Blast_functions.sh)
+        END_BPROC=$(date +%s)
+        DIFF_BPROC=$(( $END_BPROC - $START_BPROC ))
+        echo -ne "\nTIMING\t${DIFF_BPROC}\tPost processing AllHits.txt "
 fi
 #rm $query 2>/dev/null
 rm $blastordner/tid*  ; rm $blastordner/uniq-tids.txt  ; rm $blastordner/AllHits*.txt                          # remove files not of use anymore

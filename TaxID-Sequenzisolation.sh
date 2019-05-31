@@ -23,14 +23,18 @@
 
 . ${installdir}/Config.txt                                                                                                                  # <- Path to config file (unchanged)
 . ${installdir}/TaxidDetermination.sh                                                                                                       # Path to functions
-                    
+
 out=${installdir}/reftmp_$USER                                                                                                                    # define out-directory
 
 ################################################################## Sequenzisolierung #####################################################################
 
-mkdir -p $out ; chmod -R 777 $out                                                                                                           # creat out-directory 
+if [[ ! -d ${out} ]]
+    then
+        mkdir -p ${out}; chmod -R 777 ${out}                                                                                                           # creat out-directory
+fi
 # code in the while-loop will determine the taxonomy level for the respective TAX-ID until the species level is reached; therefore, repeat the loop until the species level was reached
 
+echo -ne "\n[$(date)] Obtaining scientific name for ${parentTax} and downloading genome sequences."
 name=`grep "^\<$parentTax\>" ${taxdir}/names.dmp | grep '\<scientific name\>' | cut -f3 | tr -s [:blank:] "-" | tr -d [=\'=],[=\(=],[=\)=],[=\[=],[=\]=] | tr -s [=\/=] "." | tr -d "." | sed 's/[[:punct:]]/-/g'`    # get name for parentTax-id
 if [ -z "$name" ]                                                                                                                           # if no name exists, then ...
     then                            
@@ -40,9 +44,12 @@ if [ -z "$name" ]                                                               
             then
                 echo -ne "\n\n$name was identified. \nSequences for $name are already available as reference sequences \n"                          # user info
             else                                                                                                                                    # else ...
-                grep "^\<${parentTax}\>" ${fasttaxid}/parentChildTaxid/parentChildTaxid-`echo $parentTax | cut -c1-2`.dmp | cut -f2 >> ${out}/tmptaxchild.txt # get all ChildTax-ids assigned to parentTax, only grep in file were tax-ids begin with first two characters of parenttax, get 2nd column (childTax)                        
+                echo -ne "\n[$(date)] ${name} was identified, attempting to download sequences as references."
+                grep "^\<${parentTax}\>" ${fasttaxid}/parentChildTaxid/parentChildTaxid-`echo $parentTax | cut -c1-2`.dmp | cut -f2 >> ${out}/tmptaxchild.txt # get all ChildTax-ids assigned to parentTax, only grep in file were tax-ids begin with first two characters of parenttax, get 2nd column (childTax)
                 cat ${out}/tmptaxchild.txt >> ${out}/taxchild.txt                                                                                   # cat temporary taxchild to taxchild
-                
+
+                START_TAXTREEINFO=$(date +%s)
+                echo -ne "\n[$(date)] Obtaining taxonomic tree of information"
                 until ! [ -s ${out}/tmptaxchild.txt ]                                                                                               # until the tmptaxchild.txt is empty, do ...
                     do
                         while read line                                                                                                             # while reading tmptaxchild.txt, do ...
@@ -55,9 +62,15 @@ if [ -z "$name" ]                                                               
                     done
                 echo $parentTax | cat >> ${out}/taxchild.txt                                                                                        # finally add parentTax to taxchild
                 cd ${out}
+                END_TAXTREEINFO=$(date +%s)
+                DIFF_TAXTREEINFO=$(( $END_TAXTREEINFO - $START_TAXTREEINFO ))
+                echo -ne "\nTIMING\t${DIFF_TAXTREEINFO}\tObtaining taxonomic tree of information"
+
+                # Potential issue with this if statement???
                 if ! [ -s ${refseqdir}/TID-${parentTax}_*.fna ]                                                                                     # if the referenz does not already exist in Refseq, then ...
                     then
-                        echo -ne "\n$name was identified. \nSequences for $name will be downloaded"
+                        START_ORGDOWN=$(date +%s)
+                        echo -ne "\n[`date`] $name was identified. \nSequences for $name will be downloaded"
                         z=`wc -l < ${out}/taxchild.txt`                                                                                             # count number of taxids
                         if (( $z > $threadsSplit ))                                                                                                 # if $z is bigger thant the set threads, then ...
                             then 
@@ -91,16 +104,23 @@ if [ -z "$name" ]                                                               
                         rm ${out}/taxchild.txt ; rm ${out}/tmptaxchild.txt                                                                          # remove taxchild and tmptax
                         if [[ -s ${out}/TID-${parentTax}.fna ]]
                             then
+                                START_X2KILL=$(date +%s)
                                 DoubbleKill                                                                                                                 # doubbleKill function to remove duplicated gis (TaxidDetermination.sh)
+                                END_X2KILL=$(date +%s)
+                                DIFF_X2KILL=$(( $END_X2KILL - $START_X2KILL ))
+                                echo -ne "\nTIMING\t${DIFF_X2KILL}\tRemoving duplicated sequences from the download"
                             else
                                 echo -ne "\nNo Sequences found for TaxID $parentTax $name.\n"
                         fi
+                        END_ORGDOWN=$(date +%s)
+                        DIFF_ORGDOWN=$(( $END_ORGDOWN - $START_ORGDOWN ))
+                        echo -ne "\nTIMING\t${DIFF_ORGDOWN}\tDownloading sequences for organism (includes other steps)"
                     fi
                 if [ -s ${refseqdir}/TID-${parentTax}_$name.fna ]                                                                                   # if the TID-$parentTax exists and is not empty, then ...
                     then 
                         echo                                                                                                                        # print empty string
                     else                                                                                                                            # else, ...
-                        echo -e "No sequences found\n"                                                                                              # user info
+                        echo -e "\nNo sequences found\n"                                                                                              # user info
                 fi 
         fi    
 fi

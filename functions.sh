@@ -17,7 +17,7 @@
 #!/bin/bash
 
 . ${installdir}/Config.txt                                                                                                  # <- Path of config file (unchanged)           
-    
+
 #aus Megablast-Contigs_Reads.sh 
 
 function get_rest_reads() {
@@ -33,25 +33,33 @@ if [[ $method == Blastp_vs_protdb ]]
         mv ${arbeitsvz}/tmp ${arbeitsvz}/restAcc.txt
 fi
 }
-    
-function asign_to_tid() {   
+
+function asign_to_tid() {
     while read line                                                                                                         # while reading uniq-tids.txt, do...
-        do              
+        do
+            #line=$1
             tid=`echo "$line" | cut -d " " -f1`                                                                             # cut 1st colume (tax-id) and assign it to $tid
+            START_GETSPEC=$(date +%s)
+            echo -ne "\n[$(date)] Obtaining species for taxonomic ID found."
             get_species                                                                                                     # get taxid of species
+            END_GETSPEC=$(date +%s)
+            DIFF_GETSPEC=$(( $END_GETSPEC - $START_GETSPEC ))
+            echo -ne "\nTIMING\t${DIFF_GETSPEC}\tObtaining species for taxonomic ID"
+
+            echo -ne "\n[$(date)] Checking if taxonomic ID is to be skipped."
             if [[ $tid == 77133 ]] || [[ $tid == 32630 ]]                                                                   # is species is uncultured bacterium (77133) or synthetic contruct (32630), then ...
-                then                
+                then
                     echo $tid >> ${arbeitsvz}/skiped.txt                                                                    # only write taxid to skip-file
                 else                                                                                                        # else, ...
                     grep -q "TID-${tid}" ${arbeitsvz}/AnBlast.txt                                                           # check if reference was already detected (-q quiet)
                     if [[ `echo $?` != 0 ]]                                                                                 # if grep was unsuccessful, then ... ($? holds information about last command and if it was successful. 0=successful, 1=failed)
-                        then                
-                            . ${installdir}/TaxID-Sequenzisolation.sh                                                       # start TaxID-Sequenzisolation.sh  
+                        then
+                            . ${installdir}/TaxID-Sequenzisolation.sh                                                       # start TaxID-Sequenzisolation.sh
                             echo "TID-${tid}" >> ${arbeitsvz}/AnBlast.txt                                                   # and write tax-id to Anblast.txt
                             . ${installdir}/Mapping.sh                                                                      # and start Mapping.sh
                             rndseqextract=0                                                                                 # set rndseqextract back to 0
-                    fi  
-            fi  
+                    fi
+            fi
         done < uniq-tids.txt
 }   
 
@@ -88,12 +96,17 @@ function subset_analyses()
 while (( ${restreads} > $cutoffAssembly && rndseqextract < 2 )) || [[ ! -s ${arbeitsvz}/references.txt ]]                   # as long as more than 10000 reads are remaining and assembly has not failed twice in a row continue
     do
         identity=97         
-        echo -ne "\n$(date) --> A subset of 50000 reads will be created... "            
-        shuf -n 20000 ${arbeitsvz}/restAcc.txt > ${arbeitsvz}/tmp1.txt                                                      # get a list of 5000 random accnos
+        echo -ne "\n$(date) --> A subset of 50000 reads will be created... "
+        shuf -n 50000 ${arbeitsvz}/restAcc.txt > ${arbeitsvz}/tmp1.txt                                                      # get a list of 5000 random accnos
         echo "assembly of subset... "
+
+        START_1=$(date +%s)
         ${gsflxdir}/runAssembly -o ${arbeitsvz}/assembly -fi ${arbeitsvz}/tmp1.txt -force -cpu ${threads} -mi 97 -notrim -nobig -noinfo -a 100  ${arbeitsvz}/TrimmedReads.fastq 1>/dev/null ; wait   # and assemble them
         # Assembly of subset; -a 100 (min length of contig) -force overwrite if existing; -nobig, -noinfo suppress big data files, -mi minimum identity of reads to be assembled
         echo "finished"
+        END_1=$(date +%s)
+        DIFF_1=$(( $END_1 - $START_1 ))
+        echo -ne "\nTIMING\t${DIFF_1}\tAssembly during subset analysis\n"
 # get contigs by numreads or depth ...
         mappingdir=${arbeitsvz}/assembly
 
@@ -105,54 +118,68 @@ while (( ${restreads} > $cutoffAssembly && rndseqextract < 2 )) || [[ ! -s ${arb
         ##################
 
         cd ${mappingdir}                                                                                                    # change directory
-    if [ -s ${mappingdir}/454AllContigs.fna ]                                                                               # if assembly was successful and contigs are available, then ...
-        then
-            cut -f1-3 ${mappingdir}/454ReadStatus.txt > ${mappingdir}/454ReadInfo.txt           
-            grep "contig" ${mappingdir}/454ContigGraph.txt | cut -f2- > ${mappingdir}/contigGraph.txt                       # get all contigs from contigGraph.txt and delete first column
-            csplit -s ${mappingdir}/454AllContigs.fna /\>/ {*} -f "contig-" -n 5 -z -q                                      # split the 454AllContigs-file at the header so each contig is in a seperate file
-            mv ${mappingdir}/454AllContigs.fna ${mappingdir}/454AllContigs-original.fna                                     # move 454AllContigs.fna to 454AllContigs-original.fna
-            for i in ${mappingdir}/contig-*                                                                                 # for each file containing a contig, do ...
-                do                                                                                                          
-                numread=`grep 'numreads*' $i | cut -d "=" -f3`                                                              # get the number of reads used to build the contig
-                contig=`grep "^>" ${i} | cut -d " " -f1 | tr -d ">"`                                                        # get the contig name (e.g contig00001)
-                depth=`grep "${contig}" contigGraph.txt | cut -f3`                                                          # get depth for this contig from contigGraph
-                round=`printf "%.0f" $depth`                                                                                # round depth value
-                if (( ${numread} >= 10 || ${round} >= 4 ))                                                                  # if more than 10 reads were used or depth is higher than 4, then ...
-                    then                                                                                                        
-                        cat ${i} >> ${mappingdir}/454AllContigs.fna                                                         # add the contig to 454AllContig.fna 
-                fi          
-                done            
-            grep ">" ${mappingdir}/454AllContigs.fna > ${mappingdir}/tmp.txt                                                # get all header and write them in temporary file
-            echo -ne `wc -l < tmp.txt` contigs were generated by assembly         
-            sort -t "=" -k 3 -nr ${mappingdir}/tmp.txt > ${mappingdir}/ContigInfo.txt                                       # sort tmp-file by number of reads in contig (-t "=" set delimiter to "=", -k 3 column 3, -nr sort numeric in decreasing oder)
-            cut -f1 -d  " " ${mappingdir}/tmp.txt | tr -d ">" > ${mappingdir}/contigs.txt           
-                        
-            if [ -s ${mappingdir}/454AllContigs.fna ]                                                                       # if 454AllContigs.fna existes and is not empty, then ...
-                then                                                                                                        
-                    while read line                                                                                         # while going through all the contigs in contigs.txt, do ...
-                        do
-                            grep "${line}" ${mappingdir}/454ReadInfo.txt | grep -w "Assembled" | cut -f1-2 > ${mappingdir}/${line}.txt                  # grep all the reads that were assembled into the contig
-                        done < contigs.txt
-                    cat ${mappingdir}/contig0*.txt | sort > ${mappingdir}/assembledReads.txt
-                    cut -f 1 ${mappingdir}/assembledReads.txt | sort | uniq > ${mappingdir}/assembledAcc.txt
-                    diff ${mappingdir}/assembledAcc.txt ${arbeitsvz}/restAcc.txt | grep "^>" | sed 's/^> //g' > ${mappingdir}/restAcc.txt               # compare exclude list and allAcc-list, take all that are not included in exclude list (-3), remove tab-stops at beginning of list and write to restAcc.txt   # compare exclude list and allAcc-list, take all that are not included in exclude list (-3), remove tab-stops at beginning of list and write to restAcc.txt
-                    map_vs_contigs          
-                    echo -ne "\n$(date) --> Species will be identified for assembled contigs... "                                       # user info
-                    mbcr=contig                                                                                             # set mbrc to contig                                                                                                                                                                    
-                    . ${installdir}/MegaBlast-Contigs-Reads.sh                                                              # start MegaBlast-Contig-Read.sh tool    
-                else                                                                                                
-                    let rndseqextract=rndseqextract+1                                                                       # else 1 is added to the rndseqextract-counter,
-                    #rm ${arbeitsvz}/Blastn/* 2>/dev/null                                                                   # and all filed in the Blastn-folder will be deleted
-            fi                                                                                                      
-        else                                                                                                    
+        if [ -s ${mappingdir}/454AllContigs.fna ]                                                                               # if assembly was successful and contigs are available, then ...
+            then
+                START_2=$(date +%s)
+                cut -f1-3 ${mappingdir}/454ReadStatus.txt > ${mappingdir}/454ReadInfo.txt
+                grep "contig" ${mappingdir}/454ContigGraph.txt | cut -f2- > ${mappingdir}/contigGraph.txt                       # get all contigs from contigGraph.txt and delete first column
+                csplit -s ${mappingdir}/454AllContigs.fna /\>/ {*} -f "contig-" -n 5 -z -q                                      # split the 454AllContigs-file at the header so each contig is in a seperate file
+                mv ${mappingdir}/454AllContigs.fna ${mappingdir}/454AllContigs-original.fna                                     # move 454AllContigs.fna to 454AllContigs-original.fna
+
+                ######### ATTEMPT PARALLEL LOOP
+                for i in ${mappingdir}/contig-*                                                                                 # for each file containing a contig, do ...
+                    do
+                        numread=`grep 'numreads*' $i | cut -d "=" -f3`                                                              # get the number of reads used to build the contig
+                        contig=`grep "^>" ${i} | cut -d " " -f1 | tr -d ">"`                                                        # get the contig name (e.g contig00001)
+                        depth=`grep "${contig}" contigGraph.txt | cut -f3`                                                          # get depth for this contig from contigGraph
+                        round=`printf "%.0f" $depth`                                                                                # round depth value
+                        if (( ${numread} >= 10 || ${round} >= 4 ))                                                                  # if more than 10 reads were used or depth is higher than 4, then ...
+                            then
+                                cat ${i} >> ${mappingdir}/454AllContigs.fna                                                         # add the contig to 454AllContig.fna
+                        fi
+                    done
+                ###########
+
+                grep ">" ${mappingdir}/454AllContigs.fna > ${mappingdir}/tmp.txt                                                # get all header and write them in temporary file
+                echo -ne `wc -l < tmp.txt` contigs were generated by assembly
+                sort -t "=" -k 3 -nr ${mappingdir}/tmp.txt > ${mappingdir}/ContigInfo.txt                                       # sort tmp-file by number of reads in contig (-t "=" set delimiter to "=", -k 3 column 3, -nr sort numeric in decreasing oder)
+                cut -f1 -d  " " ${mappingdir}/tmp.txt | tr -d ">" > ${mappingdir}/contigs.txt
+                END_2=$(date +%s)
+                DIFF_2=$(( $END_2 - $START_2 ))
+                echo -ne "\nTIMING\t${DIFF_2}\tPreliminary post-processing of assembly results"
+
+                if [ -s ${mappingdir}/454AllContigs.fna ]                                                                       # if 454AllContigs.fna existes and is not empty, then ...
+                    then
+                        START_3=$(date +%s)
+                        echo -ne "\n[$(date)] Post processing assembled reads from assembly results..."
+                        while read line                                                                                         # while going through all the contigs in contigs.txt, do ...
+                            do
+                                grep "${line}" ${mappingdir}/454ReadInfo.txt | grep -w "Assembled" | cut -f1-2 > ${mappingdir}/${line}.txt                  # grep all the reads that were assembled into the contig
+                            done < contigs.txt
+                        cat ${mappingdir}/contig0*.txt | sort > ${mappingdir}/assembledReads.txt
+                        cut -f 1 ${mappingdir}/assembledReads.txt | sort | uniq > ${mappingdir}/assembledAcc.txt
+                        diff ${mappingdir}/assembledAcc.txt ${arbeitsvz}/restAcc.txt | grep "^>" | sed 's/^> //g' > ${mappingdir}/restAcc.txt               # compare exclude list and allAcc-list, take all that are not included in exclude list (-3), remove tab-stops at beginning of list and write to restAcc.txt   # compare exclude list and allAcc-list, take all that are not included in exclude list (-3), remove tab-stops at beginning of list and write to restAcc.txt
+                        map_vs_contigs
+                        END_3=$(date +%s)
+                        DIFF_3=$(( $END_3 - $START_3 ))
+                        echo -ne "\nTIMING\t${DIFF_3}\tPost processing assembled reads from assembly results"
+
+                        echo -ne "\n$(date) --> Species will be identified for assembled contigs... "                                       # user info
+                        mbcr=contig                                                                                             # set mbrc to contig
+                        . ${installdir}/MegaBlast-Contigs-Reads.sh                                                              # start MegaBlast-Contig-Read.sh tool
+                    else
+                        let rndseqextract=rndseqextract+1                                                                       # else 1 is added to the rndseqextract-counter,
+                        #rm ${arbeitsvz}/Blastn/* 2>/dev/null                                                                   # and all filed in the Blastn-folder will be deleted
+                fi
+        else
             let rndseqextract=rndseqextract+1                                                                               # if no contigs are available add 1 to the rndseqextract-counter
             #rm ${arbeitsvz}/Blastn/* 2>/dev/null                                                                           # and all filed in the Blastn-folder will be deleted
         fi          
                     
-    rm ${arbeitsvz}/assembly/contig*                                                                                        # delete all files in the assembly folder
-    cd ${arbeitsvz}/Ausgangsdateien                                                                                         # change directory
-    rm -r ${arbeitsvz}/assembly                                                                                             # remove the assembly directory
-done 
+        rm ${arbeitsvz}/assembly/contig*                                                                                        # delete all files in the assembly folder
+        cd ${arbeitsvz}/Ausgangsdateien                                                                                         # change directory
+        rm -r ${arbeitsvz}/assembly                                                                                             # remove the assembly directory
+    done
 }   
 
 function get_mapping_results() 
@@ -161,10 +188,21 @@ if [[ -s ${zielordner}/454ReadStatus.txt ]]                                     
     then
         egrep "Full|Partial|Repeat|Chimeric" ${zielordner}/454ReadStatus.txt | cut -f3-7 > asigned.txt                      # grep all reads that mapped (somehow) and get column 3-7 (1-2 have no useful info)
         i=`wc -l < asigned.txt`                                                                                             # count number of mapped reads
-        
-        FamSkTaxDetermination                                                                                               # determine fam- and sk-tax (TaxidDetermination.sh)
-        
-        name=`echo $organism | sed 's/.fna//' | sed 's/.*_//' | sed 's/-/ /g' | tr -d "." | sed 's/[[:punct:]]/-/g'`        # get name by delete ending, hyphens and punctuation from reference file
+
+        taxInfoCheck=`grep -m 1 "${tid}$" ${arbeitsvz}/identifiedTaxClassifications.txt`
+        if [[ ${taxInfoCheck} == "" ]]
+            then
+                echo -ne "\nSearching for tax ID information."
+                FamSkTaxDetermination                                                                                               # determine fam- and sk-tax (TaxidDetermination.sh)
+                name=`echo $organism | sed 's/.fna//' | sed 's/.*_//' | sed 's/-/ /g' | tr -d "." | sed 's/[[:punct:]]/-/g'`        # get name by delete ending, hyphens and punctuation from reference file
+                printf "${sktax}\t${famtax}\t${name}\t${tid}\n%.0s" >> ${arbeitsvz}/identifiedTaxClassifications.txt        # Save the taxonomic information to the file in case it is needed again
+            else
+                echo -ne "\nTax ID already identified, using lookup to obtain family and genus IDs and scientific name."
+                sktax=`echo ${taxInfoCheck} | awk '{ print $1 }'`
+                famtax=`echo ${taxInfoCheck} | awk '{ print $2 }'`
+                name=`grep -m 1 "${tid}$" ${arbeitsvz}/identifiedTaxClassifications.txt | cut -f3`
+        fi
+
         echo -ne "\n$i additional reads could be assigned to $name\n"                                                       # user info
         if (( $i > 0 ))                                                                                                     # if at least one read was asigned, then ...
             then

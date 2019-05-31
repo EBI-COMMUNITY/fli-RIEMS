@@ -22,21 +22,19 @@
 
 . ${installdir}/Config.txt                                                                                                    # <- Path of config file (unchanged)
 
-referenz=$refseqdir/TID-${parentTax}_*.fna                                                                              # Default setting for referenz
+referenz=${refseqdir}/TID-${parentTax}_*.fna                                                                              # Default setting for referenz
 
-if [ -z "$referenz" ]
-then
-    echo "No sequence file found for $referenz. Cannot run mapping..."
-else
-    ziel=${arbeitsvz}/TID-${parentTax}_`grep "^\<$tid\>" ${taxdir}/names.dmp | grep '\<scientific name\>' | cut -f3 | tr -s [:blank:] "-" | tr -d [=\'=],[=\(=],[=\)=],[=\[=],[=\]=] | tr -s [=\/=] "." | tr -d "." | sed 's/[[:punct:]]/-/g'`
+if ls ${referenz} 1> /dev/null 2>&1; then
+    ziel=${arbeitsvz}/TID-${parentTax}_$(grep "^\<$tid\>" ${taxdir}/names.dmp | grep '\<scientific name\>' | cut -f3 | tr -s [:blank:] "-" | tr -d [=\'=],[=\(=],[=\)=],[=\[=],[=\]=] | tr -s [=\/=] "." | tr -d "." | sed 's/[[:punct:]]/-/g')
                                                                                                                             # define folder_name
     zielordner=${ziel}/MappingFiles                                                                                         # Default setting for folder
 
     ######################################################################## Mapping #########################################################################
 
+    START_MAPVSORG=$(date +%s)
     mkdir -p ${ziel}/MappingFiles                                                                                           # create folder
     organism=`basename $referenz`                                                                                           # get name of organism
-    echo -ne "\nRunning Mapping vs ${organism}... "                                                                         # user info
+    echo -ne "\n[$(date)] Running Mapping vs ${organism}... "                                                                         # user info
     num=`wc -l < ${arbeitsvz}/restAcc.txt`                                                                                  # count remaining reads
     if (( num > 10000 ))                                                                                                    # if more than 10000 reads remaining do...
         then
@@ -57,26 +55,56 @@ else
             fi
             cd ${zielordner}                                                                                                # change directory
             ((p=$num/$j))                                                                                                   # calculate p by number of remaining reads and core to be used
-                    split -a 5 -d -l $p ${arbeitsvz}/restAcc.txt part-                                                                      # split file of remaining accno. by p lines
+            split -a 5 -d -l $p ${arbeitsvz}/restAcc.txt part-                                                                      # split file of remaining accno. by p lines
+
+            START_ACTUALMAPPING=$(date +%s)
+            ###### ATTEMPT GNU-PARALLEL
+            #ls part-* | parallel -j0 "${gsflxdir}/runMapping -o map-{} -no -force -noace -nobam -noinfo -rst 0 -m -n -np -mi $identity -ml 95% -ud -cpu 10 -tr -notrim -fi {} ${referenz} ${arbeitsvz}/TrimmedReads.fastq 1>/dev/null"
+
             for i in part-*                                                                                                 # for each file do...
                 do
                     ${gsflxdir}/runMapping -o map-${i} -no -force -noace -nobam -noinfo -rst 0 -m -n -np -mi $identity -ml 95% -ud -cpu 24 -tr -notrim -fi ${i} ${referenz} ${arbeitsvz}/TrimmedReads.fastq 1>/dev/null &    # map reads to Reference
                 done        #runMapping against reference sequences for TaxID ($referenz) with given minimum identity (-mi) and a minimum overlap (-ml) of 95%, only with reads that are included in accession-file (-fi)
-                wait   1>/dev/null 2>&1                                                                                     # and wait until all mappings have finished
+            wait   1>/dev/null 2>&1                                                                                     # and wait until all mappings have finished
+            ##########################
+            END_ACTUALMAPPING=$(date +%s)
+            DIFF_ACTUALMAPPING=$(( $END_ACTUALMAPPING - $START_ACTUALMAPPING ))
+            echo -ne "\nTIMING\t${DIFF_ACTUALMAPPING}\tCommand for mapping remaining reads against ${organism}"
+
+            START_MAPPROC=$(date +%s)
+            echo -ne "\n[$(date)] Post-processing mapping results..."
             for i in map-part-*                                                                                             # for each mapping, do ....
                 do
-                    cat ${i}/454ReadStatus.txt >> 454ReadStatus.txt                                                         # get the ReadStatus and cat them together
-                done
+                    cat ${i}/454ReadStatus.txt >> 454ReadStatus.txt &                                                       # get the ReadStatus and cat them together
+                done; wait
+            END_MAPPROC=$(date +%s)
+            DIFF_MAPPROC=$(( $END_MAPPROC - $START_MAPPROC ))
+            echo -ne "\nTIMING\t${DIFF_MAPPROC}\tCreating one file of combined mapping results"
 
             rm -r ${zielordner}/map-* ; rm ${zielordner}/part-*
             cd ${arbeitsvz}                                                                                                 # change directory
         else
+            START_LESSMAP=$(date +%s)
+            echo -ne "\n --> Less than 10000 reads remaining to map. "
             ${gsflxdir}/runMapping -force -noace -no -nobam -noinfo -m -n -np -mi $identity -ml 95% -rst 0 -ud -cpu $threads -notrim -tr -o $zielordner -fi ${arbeitsvz}/restAcc.txt $referenz ${arbeitsvz}/TrimmedReads.fastq 1>/dev/null  # else map all unassigned reads against reference
+            END_LESSMAP=$(date +%s)
+            DIFF_LESSMAP=$(( $END_LESSMAP - $START_LESSMAP ))
+            echo -ne "\nTIMING\t${DIFF_LESSMAP}\tCommand for mapping remaining < 10000 reads against ${organism}"
     fi                      #runMapping against reference sequences for TaxID ($referenz) with given minimum identity (-mi) and a minimum overlap (-ml) of 95%, only with reads that are included in accession-file (-fi)
 
     echo $referenz >> ${arbeitsvz}/references.txt                                                                           # write the referenz to a file for further use in Mapping2
     ln -s $referenz ${arbeitsvz}/DB/`basename $referenz`                                                                    # create a link of to reference to the DB-directory
     grep "^>" $referenz | cut -f2 -d "|" >> ${arbeitsvz}/Orgs_gis.txt                                                       # get all gis/accessions from reference for further use in Blastn_vs_Organisms
+    END_MAPVSORG=$(date +%s)
+    DIFF_MAPVSORG=$(( $END_MAPVSORG - $START_MAPVSORG ))
+    echo -ne "\nTIMING\t${DIFF_MAPVSORG}\tMapping reads against an identified organism (includes other steps)"
+
+    START_MAPRET=$(date +%s)
     get_mapping_results                                                                                                     # get mapping results (see functions.sh)
+    END_MAPRET=$(date +%s)
+    DIFF_MAPRET=$(( $END_MAPRET - $START_MAPRET ))
+    echo -ne "\nTIMING\t${DIFF_MAPRET}\tRetrieving mapping results"
+else
+    echo -ne "\nNo sequence file found for $referenz. Cannot run mapping..."
 fi
 

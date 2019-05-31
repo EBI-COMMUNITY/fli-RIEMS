@@ -26,7 +26,7 @@ function get_tid() {
     sort -n uniq-tids.txt | uniq > tmp_tax                                                      # write temporary file with uniq taxids to print on screen
     echo -e "\rData processing... 100% completed"                                               # user info
     echo -ne "Following Tax-IDs found:\n\n"                                                     # user info                                                                                                                                                                                                                                                                                                        # user info
-    cat tmp_tax                                                                                 # print uniq tax-id on screen
+    cat tmp_tax                                                                                 # print uniq tax-id on screenƒexit
     let rndseqextract=rndseqextract+1                                                           # add 1 do rndseqextract
 }
 
@@ -62,19 +62,31 @@ function assign_reads() {                                                       
                 do
                     while read line                                                                     # while reading the contig_tid.txt, do ...
                         do
-                            num=`echo $line | cut -f 1 -d " "`                                          # get the contig name (1st column)
-                            tid=`echo $line | cut -f 2 -d " "`                                          # get taxid (2nd column)
-                            ident=`grep ${num} Blast-Hits.txt | cut -f 3`                               # get Blast Identity (3rd column of Blast-Results)
-                            get_species                                                                 # get species tid (see TaxidDetermination.sh)
-                            FamSkTaxDetermination                                                       # get superkingdom- and family-tid (see TaxidDetermination.sh)
-                            if [[ `grep -w "^${tid}" ${taxdir}/names.dmp | grep '\<scientific name\>'` != "" ]]          # if "scientific name" for taxid can be grepped and is not an empty string, then ...
+                            num=`echo $line | cut -f 1 -d " "`
+                            tid=`echo $line | cut -f 2 -d " "`
+                            ident=`grep -m 1 ${num} Blast-Hits.txt | cut -f 3`
+                            taxInfoCheck=`grep -m 1 "${tid}$" ${arbeitsvz}/identifiedTaxClassifications.txt`
+                            if [[ "${taxInfoCheck}" != "" ]]
                                 then
-                                    name=`grep -w "^${tid}" ${taxdir}/names.dmp | grep '\<scientific name\>' | cut -f3 | tr -d [=\'=],[=\(=],[=\)=],[=\[=],[=\]=] | tr -s [=\/=] "." | tr -s "-" " " | tr -d "." | sed 's/[[:punct:]]/-/g'`    # grep $line in names.dmp, grep "scientific name" (if possible) and cut 3rd column for name
-                            elif [[ `grep -w "^${tid}" ${taxdir}/names.dmp | grep -m 1 '\<synonym\>'` != "" ]]                                                                                                # else, ...
-                                then
-                                    name=`grep -w "^${tid}" ${taxdir}/names.dmp | grep -m 1 '\<synonym\>' | cut -f3 | tr -d [=\'=],[=\(=],[=\)=],[=\[=],[=\]=] | tr -s [=\/=] "." | tr -s "-" " " | tr -d "." | sed 's/[[:punct:]]/-/g'`       # grep the first synonym you find as a name
+                                    # If the taxonomic information for a given ID already exists
+                                    sktax=`echo ${taxInfoCheck} | awk '{ print $1 }'`
+                                    famtax=`echo ${taxInfoCheck} | awk '{ print $2 }'`
+                                    name=`grep -m 1 "${tid}$" ${arbeitsvz}/identifiedTaxClassifications.txt | cut -f3`
+                                    echo -ne "${line}\t$tid\t${famtax}\t${sktax}\n" >> tid-fam-sk-tax.txt
                                 else
-                                    name=`echo`                                                         # if no name is found write and empty line (important because otherwise the order is messed up)
+                                    # If the taxonomic information for a given ID needs to be obtained
+                                    get_species
+                                    FamSkTaxDetermination
+                                    if [[ `grep -w "^${tid}" ${taxdir}/names.dmp | grep '\<scientific name\>'` != "" ]]          # if "scientific name" for taxid can be grepped and is not an empty string, then ...
+                                        then
+                                            name=`grep -w "^${tid}" ${taxdir}/names.dmp | grep '\<scientific name\>' | cut -f3 | tr -d [=\'=],[=\(=],[=\)=],[=\[=],[=\]=] | tr -s [=\/=] "." | tr -s "-" " " | tr -d "." | sed 's/[[:punct:]]/-/g'`    # grep $line in names.dmp, grep "scientific name" (if possible) and cut 3rd column for name
+                                    elif [[ `grep -w "^${tid}" ${taxdir}/names.dmp | grep -m 1 '\<synonym\>'` != "" ]]                                                                                                # else, ...
+                                        then
+                                            name=`grep -w "^${tid}" ${taxdir}/names.dmp | grep -m 1 '\<synonym\>' | cut -f3 | tr -d [=\'=],[=\(=],[=\)=],[=\[=],[=\]=] | tr -s [=\/=] "." | tr -s "-" " " | tr -d "." | sed 's/[[:punct:]]/-/g'`       # grep the first synonym you find as a name
+                                        else
+                                            name=`echo`                                                         # if no name is found write and empty line (important because otherwise the order is messed up)
+                                    fi
+                                    printf "${sktax}\t${famtax}\t${name}\t${tid}\n%.0s" >> ${arbeitsvz}/identifiedTaxClassifications.txt         # Save the taxonomic information retrieved in a file
                             fi
                             cat ${arbeitsvz}/assembly/${num}* > ${num}.txt                              # cat all files named after the contig name from the assembly folder
                             length=`wc -l < ${num}.txt`                                                 # get number of reads per contig
@@ -82,7 +94,7 @@ function assign_reads() {                                                       
                                 then
                                     method=Assembly
                                     printf "${method}\t${sktax}\t${famtax}\t${tid}\t${name}\t${ident}\n%.0s" $(seq 1 $length) > ${num}_tmp1.txt    # print length-times basic info for asignedAcc.txt
-                                    paste ${num}_tmp1.txt ${num}.txt > info_${num}.txt                         # and combine basic info with read-info
+                                    paste ${num}_tmp1.txt ${num}.txt > info_${num}.txt                       # and combine basic info with read-info
                             fi
                         done < $i &
                 done
@@ -94,6 +106,10 @@ function assign_reads() {                                                       
             assigned=`wc -l < assembledReads.txt`                                               # count number of reads that could be assigned by assembly
             echo -ne "\n\n$assigned could be assigned within the assembly\n                     
             and $restreads are left\n"                                                          # user info
+
+            # Remove duplicate taxonomic ID information
+            sort ${arbeitsvz}/identifiedTaxClassifications.txt | uniq > ${arbeitsvz}/tmpTaxClass.txt
+            mv ${arbeitsvz}/tmpTaxClass.txt ${arbeitsvz}/identifiedTaxClassifications.txt
             #rm info* 1>/dev/null 2>&1
     fi
 }
@@ -123,16 +139,25 @@ function assign_rnd_reads() {
                     while read line                                                             # while reading the contig_tid.txt, do ...
                         do
                             tid=$line                                                           # get taxid (2nd column)
-                            get_species                                                         # get species tid by querying nodes.dmp file for species name
-                            FamSkTaxDetermination                                               # get superkingdom- and family-tid
-                            if [[ `grep -w "^${tid}" ${taxdir}/names.dmp | grep '\<scientific name\>'` != "" ]]          # if "scientific name" for taxid can be grepped and is not an empty string, then ...
+                            taxInfoCheck=`grep -m 1 "${tid}$" ${arbeitsvz}/identifiedTaxClassifications.txt`
+                            if [[ ${taxInfoCheck} != "" ]]
                                 then
-                                    name=`grep -w "^${tid}" ${taxdir}/names.dmp | grep '\<scientific name\>' | cut -f3 | tr -d [=\'=],[=\(=],[=\)=],[=\[=],[=\]=] | tr -s [=\/=] "." | tr -s "-" " " | tr -d "." | sed 's/[[:punct:]]/-/g'`    # grep $line in names.dmp, grep "scientific name" (if possible) and cut 3rd column for name
-                            elif [[ `grep -w "^${tid}" ${taxdir}/names.dmp | grep -m 1 '\<synonym\>'` != "" ]]                                                                                                # else, ...
-                                then
-                                    name=`grep -w "^${tid}" ${taxdir}/names.dmp | grep -m 1 '\<synonym\>' | cut -f3 | tr -d [=\'=],[=\(=],[=\)=],[=\[=],[=\]=] | tr -s [=\/=] "." | tr -s "-" " " | tr -d "." | sed 's/[[:punct:]]/-/g'`       # grep the first synonym you find as a name
-                            else
-                                name=`echo`                                                     # if no name is found write and empty line (important because otherwise the order is messed up)
+                                    sktax=`echo ${taxInfoCheck} | awk '{ print $1 }'`
+                                    famtax=`echo ${taxInfoCheck} | awk '{ print $2 }'`
+                                    name=`grep -m 1 "${tid}$" ${arbeitsvz}/identifiedTaxClassifications.txt | cut -f3`
+                                else
+                                    get_species                                                         # get species tid by querying nodes.dmp file for species name
+                                    FamSkTaxDetermination                                               # get superkingdom- and family-tid
+                                    if [[ `grep -w "^${tid}" ${taxdir}/names.dmp | grep '\<scientific name\>'` != "" ]]          # if "scientific name" for taxid can be grepped and is not an empty string, then ...
+                                        then
+                                            name=`grep -w "^${tid}" ${taxdir}/names.dmp | grep '\<scientific name\>' | cut -f3 | tr -d [=\'=],[=\(=],[=\)=],[=\[=],[=\]=] | tr -s [=\/=] "." | tr -s "-" " " | tr -d "." | sed 's/[[:punct:]]/-/g'`    # grep $line in names.dmp, grep "scientific name" (if possible) and cut 3rd column for name
+                                    elif [[ `grep -w "^${tid}" ${taxdir}/names.dmp | grep -m 1 '\<synonym\>'` != "" ]]                                                                                                # else, ...
+                                        then
+                                            name=`grep -w "^${tid}" ${taxdir}/names.dmp | grep -m 1 '\<synonym\>' | cut -f3 | tr -d [=\'=],[=\(=],[=\)=],[=\[=],[=\]=] | tr -s [=\/=] "." | tr -s "-" " " | tr -d "." | sed 's/[[:punct:]]/-/g'`       # grep the first synonym you find as a name
+                                    else
+                                        name=`echo`                                                     # if no name is found write and empty line (important because otherwise the order is messed up)
+                                    fi
+                                    printf "${sktax}\t${famtax}\t${name}\t${tid}\n%.0s" >> ${arbeitsvz}/identifiedTaxClassifications.txt
                             fi
                             awk -v tax="$line" '$3 == tax' reads_tid.txt > ${line}_tmp.txt      # get all lines were the 3rd column equals the current taxid and write them to file
                             length=`wc -l < ${line}_tmp.txt`                                    # count lines of file belonging to taxid
@@ -153,9 +178,9 @@ function assign_rnd_reads() {
             assigned=`wc -l < blastedReads.txt`                                                 # count number of assigned read during round of blastedReads
             echo -ne "\n\n$assigned of 1000 random reads could be assigned by Megablast \n
             and $restreads are left\n"                                                          # user info
-            rm info*                                                                            # remove files with no use anymore
+            #rm info*                                                                            # remove files with no use anymore
     fi
-    }
+}
 
 function get_krit() {                                                                           # function to get krit-value
     if (( $restreads >= 100000 ))                                                               # if more than 100000 read left, then ...
@@ -177,8 +202,17 @@ function get_krit() {                                                           
 
 function get_tid_read() {
     cut -f4 Blast-Hits.txt 2>/dev/null  > tid.txt                                               # get second column of Blast-Hits and then get second column again by "|" to get gis
+    START_11=$(date +%s)
+    echo -ne "\n[$(date)] Assigning read information to the taxonomic information from BLAST."
     reads_to_tid                                                                                # assign reads to taxid (see above)
+    echo -ne "\n[$(date)] Assigning reads to the taxonomic and BLAST information."
     assign_rnd_reads                                                                            # assign random reads (see above)
+    END_11=$(date +%s)
+    DIFF_11=$(( $END_11 - $START_11 ))
+    echo -ne "\nTIMING\t${DIFF_11}\tAssigning taxonomic information to blast results and reads"
+
+    START_12=$(date +%s)
+    echo -ne "\n[$(date)] Post processing of combined reads and BLAST information."
     cut -f2 tid.txt | sort | uniq > uniq-tids.txt                                               # sort uniq tax-ids
     gesamt=`wc -l < ${multiblastrnddir}/uniq-tids.txt`                                                              # get number of uniq tax-ids
     paste Blast-Hits.txt tid.txt > gis.txt                                                      # combine blast-hits and tax-ids
@@ -194,8 +228,15 @@ function get_tid_read() {
 
     get_krit                                                                                    # get krit-value (see above)
 # get only tax-ids that are great or equal to a given krit-value
+    END_12=$(date +%s)
+    DIFF_12=$(( $END_12 - $START_12 ))
+    echo -ne "\nTIMING\t${DIFF_12}\tPost processing of combined reads and BLAST information"
+
+
     if [ -s Tax-Count.txt ]                                                                     # if Tax-Count.txt exists and is not empty, then ...
         then
+            START_TAXCOUNT=$(date +%s)
+            echo -ne "\n[$(date)] Counting number of assignments to organisms, obtaining more popular hits."
             while read line                                                                     # while reading Tax-Count.txt, do ...
                 do 
                     if (( `echo "$line" | cut -d " " -f2` >= $krit ))                           # if 2nd column of Tax-Count.txt line is great or equal to $krit, then ...
@@ -203,18 +244,66 @@ function get_tid_read() {
                             echo "`echo "$line" | cut -d " " -f1`" >> Tax-Count-bigger10.txt    # add tax-id to Tax-Count-bigger10.txt
                     fi  
                 done < Tax-Count.txt
+            END_TAXCOUNT=$(date +%s)
+            DIFF_TAXCOUNT=$(( $END_TAXCOUNT - $START_TAXCOUNT ))
+            echo -ne "\nTIMING\t${DIFF_TAXCOUNT}\tCounting number of assignments to organisms, obtaining more popular hits"
+
             if [ -s Tax-Count-bigger10.txt ]                                                    # if Tax-Count-bigger10.txt exists and is not empty, then ...
                 then 
+                    START_MAPWITHPOP=$(date +%s)
+                    echo -ne "\n[$(date)] Mapping remaining reads against further identified organisms."
                     echo -ne "following Tax-IDs will be further used:  \n"                      # user info
                     cat Tax-Count-bigger10.txt                                                  # about tax-ids
                     mv Tax-Count-bigger10.txt uniq-tids.txt                                     # and move Tax-Count-bigger10.txt to uniq-tids.txt (more popular tax IDs)
                     identity=97                                                                 # set identity to assign reads
                     method=Mapping                                                              # set method to assign reads
                     asign_to_tid                                                                # to assign reads to tax-id (see above)
+                    END_MAPWITHPOP=$(date +%s)
+                    DIFF_MAPWITHPOP=$(( $END_MAPWITHPOP - $START_MAPWITHPOP ))
+                    echo -ne "\nTIMING\t${DIFF_MAPWITHPOP}\tMapping remaining reads against further identified organisms"
             fi
             
     fi 
     echo
     rm MultiBlast/RndReads/gis.txt; rm MultiBlast/RndReads/tid.txt; rm MultiBlast/RndReads/uniq-tids.txt # remove files
     let rndseqextract=rndseqextract+1                                                           # add 1 to rndseqextract
+}
+
+function taxClassificationInfo() {
+# Obtain information about each taxonomic ID in anticipation of taxonomic read assignment
+split -l 1 uniq-tids.txt tiduniq-part-
+for i in tiduniq-part-*
+    do
+        while read line
+            do
+                tid=${line}
+                START_SPECIES=$(date +%s)
+                get_species
+                END_SPECIES=$(date +%s)
+                DIFF_SPECIES=$(( $END_SPECIES - $START_SPECIES ))
+                echo -ne "\nTIMING\t${DIFF_SPECIES}\tObtaining species information"
+
+                START_OTHERID=$(date +%s)
+                FamSkTaxDetermination
+                END_OTHERID=$(date +%s)
+                DIFF_OTHERID=$(( $END_OTHERID - $START_OTHERID ))
+                echo -ne "\nTIMING\t${DIFF_OTHERID}\tObtaining other taxonomic ID information"
+
+                START_NAME=$(date +%s)
+                if [[ `grep -w "^${tid}" ${taxdir}/names.dmp | grep '\<scientific name\>'` != "" ]]          # if "scientific name" for taxid can be grepped and is not an empty string, then ...
+                    then
+                        name=`grep -w "^${tid}" ${taxdir}/names.dmp | grep '\<scientific name\>' | cut -f3 | tr -d [=\'=],[=\(=],[=\)=],[=\[=],[=\]=] | tr -s [=\/=] "." | tr -s "-" " " | tr -d "." | sed 's/[[:punct:]]/-/g'`    # grep $line in names.dmp, grep "scientific name" (if possible) and cut 3rd column for name
+                elif [[ `grep -w "^${tid}" ${taxdir}/names.dmp | grep -m 1 '\<synonym\>'` != "" ]]                                                                                                # else, ...
+                    then
+                        name=`grep -w "^${tid}" ${taxdir}/names.dmp | grep -m 1 '\<synonym\>' | cut -f3 | tr -d [=\'=],[=\(=],[=\)=],[=\[=],[=\]=] | tr -s [=\/=] "." | tr -s "-" " " | tr -d "." | sed 's/[[:punct:]]/-/g'`       # grep the first synonym you find as a name
+                    else
+                        name=`echo`                                                         # if no name is found write and empty line (important because otherwise the order is messed up)
+                fi
+                END_NAME=$(date +%s)
+                DIFF_NAME=$(( $END_NAME - $START_NAME ))
+                echo -ne "\nTIMING\t${DIFF_NAME}\tObtaining species name information"
+                printf "${sktax}\t${famtax}\t${name}\t${tid}\n%.0s" >> ${arbeitsvz}/identifiedTaxClassifications.txt         # Save the taxonomic information retrieved in a file
+            done < $i &
+    done; wait
+rm tiduniq-part*
 }

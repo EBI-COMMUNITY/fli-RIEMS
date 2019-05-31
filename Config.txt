@@ -28,6 +28,8 @@ embossdir=/homes/blaise/scripts/bin                                     # direct
 blastdir=/hps/nobackup/nucleotide/rahman/development/ncbi-blast-2.9.0+/bin                           # directory containg all BLAST software applications (e.g. blastn, makeblastdb etc.)
 R=/usr/lib64/R/bin                                                 # path to R
 latexdir=/usr/bin                                                  # path to Latex
+trimmomaticdir=/hps/nobackup/nucleotide/rahman/development/packages/trimmomatic-0.38/			# path to Trimmomatic
+spadesdir=/homes/rahman/packages/SPAdes-3.13.0-Linux/bin		# path to SPAdes bin folder	
 
 
 ########################################## Database paths

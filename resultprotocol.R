@@ -46,7 +46,7 @@ resultprotocol$Method <- gsub("-","_",resultprotocol$Method)
 TaxIDs <- unique(resultprotocol[order(as.numeric(resultprotocol$SkTax),as.numeric(resultprotocol$FamTax),as.numeric(resultprotocol$Tax)),6:9])
 TaxIDs$counts <- 0
 unique.methods <- unique(resultprotocol$Method)
-TaxIDs$Ident.Blastn_vs_ntdb <- TaxIDs$Blastn_vs_ntdb <- TaxIDs$Ident.Blastn_vs_Organism <- TaxIDs$Blastn_vs_Organism <- TaxIDs$Ident.Megablast_vs_ntdb <- TaxIDs$Megablast_vs_ntdb <- TaxIDs$Ident.Assembly <- TaxIDs$Assembly <- TaxIDs$Mapping2 <- TaxIDs$Mapping <- TaxIDs$Pre_Screening <- 0
+TaxIDs$Ident.Blastn_vs_ntdb <- TaxIDs$Blastn_vs_ntdb <- TaxIDs$Ident.Blastn_vs_Organism <- TaxIDs$Blastn_vs_Organism <- TaxIDs$Ident.Megablast_vs_ntdb <- TaxIDs$Megablast_vs_ntdb <- TaxIDs$Ident.Assembly <- TaxIDs$Assembly <- TaxIDs$Mapping2 <- TaxIDs$Mapping <- TaxIDs$Pre_Screening <- TaxIDs$Scaffold_Assembly <- 0
 
 #for(i in 1:nrow(TaxIDs)){
 #	
@@ -65,7 +65,7 @@ for(i in 1:nrow(TaxIDs)){
 			names <- which(colnames(TaxIDs)==unique.methods[j])
 			TaxIDs[i,names] <- count1
 		}
-		blast <- grep("Blast|blast|Assembly",unique.methods[j])
+		blast <- grep("Blast|blast|Assembly|Scaffold_Assembly",unique.methods[j])
 		if(is.int(blast)==FALSE & count1!=0){
 			
 			min.ident <- min(resultprotocol$Identity[which(TaxIDs$Tax[i]==resultprotocol$Tax & resultprotocol$Method==unique.methods[j])],na.rm = T)

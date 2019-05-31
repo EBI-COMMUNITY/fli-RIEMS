@@ -37,27 +37,38 @@ echo -ne "\n\n$(date) --> Running ASSEMBLY of all $allaccnos unassigned Reads...
 process=newbler
 
 #cp ${arbeitsvz}/restAcc.txt ${arbeitsvz}/restAcc_`date +"%T"`
+START_14=$(date +%s)
 echo -ne "Carrying out assembly of unassigned reads: \n"
-echo -ne "${gsflxdir}/runAssembly -rip -o ${outputordner}/Assembly -fi ${arbeitsvz}/restAcc.txt -notrim -tr -force -noinfo -cpu ${threads} -acedir -ml 20 ${arbeitsvz}/TrimmedReads.fastq"
-echo -ne "${gsflxdir}/fnafile -o ${arbeitsvz}/restReads.fasta -i ${arbeitsvz}/restAcc.txt ${arbeitsvz}/TrimmedReads.fasta"
+#echo -ne "${gsflxdir}/runAssembly -rip -o ${outputordner}/Assembly -fi ${arbeitsvz}/restAcc.txt -notrim -tr -force -noinfo -cpu ${threads} -acedir -ml 20 ${arbeitsvz}/TrimmedReads.fastq"
+#echo -ne "${gsflxdir}/fnafile -o ${arbeitsvz}/restReads.fasta -i ${arbeitsvz}/restAcc.txt ${arbeitsvz}/TrimmedReads.fasta"
 ${gsflxdir}/fnafile -o ${arbeitsvz}/restReads.fasta -i ${arbeitsvz}/restAcc.txt ${arbeitsvz}/TrimmedReads.fasta                 # creat fasta-file of all unassigned reads
-${gsflxdir}/runAssembly -rip -o ${outputordner}/Assembly -fi ${arbeitsvz}/restAcc.txt -notrim -tr -force -noinfo -cpu ${threads} -acedir -ml 20 ${arbeitsvz}/TrimmedReads.fastq #1>/dev/null & # runAssembly with all unassigned reads
+${gsflxdir}/runAssembly -rip -o ${outputordner}/Assembly -fi ${arbeitsvz}/restAcc.txt -notrim -tr -force -noinfo -cpu ${threads} -acedir -ml 20 ${arbeitsvz}/TrimmedReads.fastq 1>/dev/null & # runAssembly with all unassigned reads
+wait
 #cp ${outputordner}/Assembly/454AllContigs.fna ${arbeitsvz}/454AllContigs.fna.`date| perl -lne '~s/ //g;print;'`
    # -force: force overwriting ; -acedir: directory with info about read assignment to contigs; -ml min length of read ( in %) to be assembled
    # -ml: wahrscheinlich minimale L�nge eines Reads in % um Bestandteil eines Contigs zu werden
 cd $outputordner
+END_14=$(date +%s)
+DIFF_14=$(( $END_14 - $START_14 ))
+echo -ne "\nTIMING\t${DIFF_14}\tAssembly of remaining reads during assembly contig blast"
 
 echo -ne "\n$(date) --> Data processing... "                                                                                                # user info
 if [[ -s Assembly/454ReadStatus.txt ]] && [[ -s Assembly/454AllContigs.fna ]]
-    then 
+    then
+        START_15=$(date +%s)
         egrep "Assembled|Repeat" Assembly/454ReadStatus.txt > Assembly/assembledAcc.txt                                         # grep readstatus for assembled reads
         egrep -v "Assembled|Repeat|Accno" Assembly/454ReadStatus.txt | cut -f 1 > Assembly/unassembledAcc.txt                   # grep readstatus for all unassembled reads (also excludes header line)
         assembledaccnos=`wc -l < Assembly/assembledAcc.txt`                                                                     # count all assembled reads
         gesamt=`grep -c '>' Assembly/454AllContigs.fna`                                                                         # count number of contigs
         echo "completed & $assembledaccnos Reads assembled into $gesamt Contig(s)."                                             # user info
+        END_15=$(date +%s)
+        DIFF_15=$(( $END_15 - $START_15 ))
+        echo -ne "\nTIMING\t${DIFF_15}\tPost processing of reads assembled into contigs"
 
 ################################################################ Megablast Rest vs Contigs ################################################################
-        echo -n "Preparing Megablast for all unassembled Reads... "                                                             # user info
+        echo -ne "\n\n-----{Megablast Unassembled Reads against Contigs - Start [`date`]}-----"
+        START_16=$(date +%s)
+        echo -ne "\n[$(date)] Preparing Megablast for all unassembled reads... "                                                             # user info
         grep -v 'Accno' Assembly/unassembledAcc.txt | cut -f1 | sort | uniq > Assembly/All-Accnos.txt                           # get all Accnos sort them and make them uniq
         allaccnos=`wc -l < Assembly/All-Accnos.txt`                                                                             # count number of Reads
         #rm Assembly/All-Accnos.txt
@@ -67,12 +78,22 @@ if [[ -s Assembly/454ReadStatus.txt ]] && [[ -s Assembly/454AllContigs.fna ]]
         infilesize=`du -sbL Assembly/454AllContigs.fna | cut -f1`                                                               # get size of file
         dbsize=`echo "$infilesize*0.26/${threads}" | bc`                                                                        # divide size to all CPUs
         ${blastdir}/makeblastdb -dbtype nucl -in Assembly/454AllContigs.fna -max_file_sz ${dbsize}                              # and make a blastdb of the file
-        
-        echo -ne "\nRunning Megablast... "                                                                                      # user info
-        ${blastdir}/blastn -db Assembly/454AllContigs.fna -num_threads ${threads} -max_hsps 1 -max_target_seqs 1 -out Assembly/Megablast_Unassigned.txt -query Assembly/sff/Unassigned-Accnos.fasta -outfmt '6 pident qseqid sseqid qstart qend qlen evalue '  # wg. Problemen mit BLAST bei culling_limit entfernt: 
+        END_16=$(date +%s)
+        DIFF_16=$(( $END_16 - $START_16 ))
+        echo -ne "\nTIMING\t${DIFF_16}\tPreparation for megablast of unassembled reads during assembly contig blast"
+
+        echo -ne "\n[$(date)] Running Megablast... "                                                                                      # user info
+        START_17=$(date +%s)
+        ${blastdir}/blastn -db Assembly/454AllContigs.fna -num_threads ${threads} -max_hsps 1 -max_target_seqs 1 -out Assembly/Megablast_Unassigned.txt -query Assembly/sff/Unassigned-Accnos.fasta -outfmt '6 pident qseqid sseqid qstart qend qlen evalue '  # wg. Problemen mit BLAST bei culling_limit entfernt:
                 # megablast of Reads vs Contigs
+        END_17=$(date +%s)
+        DIFF_17=$(( $END_17 - $START_17 ))
+        echo -ne "\nTIMING\t${DIFF_17}\tMegablast of unassembled reads during assembly contigs blast"
+
         if [[ -s Assembly/Megablast_Unassigned.txt ]]                                                                           # if Assembly/Megablast_Unassigned.txt exists (Blast was successful and had hits), then ...
             then
+                START_18=$(date +%s)
+                echo -ne "\n[`date`] Post-processing unassembled reads megablast results."
                 #cp Assembly/Megablast_Unassigned.txt ${arbeitsvz}/Megablast_Unassigned.txt.`date| perl -lne '~s/ //g;print;'`
                 #echo -ne "\rRunning Megablast... data processing... "                                                          # user info
                 gesamt=`wc -l < Assembly/Megablast_Unassigned.txt`                                                              # count number of Hits
@@ -88,13 +109,19 @@ if [[ -s Assembly/454ReadStatus.txt ]] && [[ -s Assembly/454AllContigs.fna ]]
                             then                                                                                                
                                 cat Assembly/tmp.txt >> Assembly/Megablast_Assigned.txt                                         # write tmp (containing Hit-Read) to Megablast_Assigned.txt
                         fi
-                    done < Assembly/Megablast_Unassigned.txt & wait                                                             
+                    done < Assembly/Megablast_Unassigned.txt & wait
+                END_18=$(date +%s)
+                DIFF_18=$(( $END_18 - $START_18 ))
+                echo -ne "\nTIMING\t${DIFF_18}\tProcessing unassembled reads megablast results"
         fi
+        echo -ne "\n\n-----{Megablast Unassembled Reads against Contigs - End [`date`]}-----"
 
 ###################################################################### Blastn Contigs #####################################################################
+        echo -ne "\n\n-----{Megablast Contigs against Nucleotide Database - Start [`date`]}-----"
         # Aufruf des Blast Programms
         echo -ne "\n\nRunning Megablast to identify the Contigs\n"                                                                  # user info
         
+        START_19=$(date +%s)
         blastvek=(0 0 tax 0 0)                                                                                                  # set blastvek for Blast.sh
         query=${outputordner}/Assembly/454AllContigs.fna                                                                        # set query for Blast.sh
         blastordner=${outputordner}/Blast                                                                                       # set blastfolder for Blast.sh
@@ -103,9 +130,13 @@ if [[ -s Assembly/454ReadStatus.txt ]] && [[ -s Assembly/454AllContigs.fna ]]
         mkdir -p $blastordner
         cd $blastordner
         . $installdir/Blast.sh                                                                                                  # Blast.sh
-        
+        END_19=$(date +%s)
+        DIFF_19=$(( $END_19 - $START_19 ))
+        echo -ne "\nTIMING\t${DIFF_19}\tMegablast of assembled contigs during assembly contigs blast"
+
         # Zu den Family Tax-id zugeordneten Contigs aus dem Blast, werden die Accnos herausgesucht
-        echo -ne "Final data processing... "                                                                                    # user info
+        START_20=$(date +%s)
+        echo -ne "\n[$(date)] Final data processing... "                                                                                    # user info
         cd $outputordner                                                                                                        # change back to working directory (changed in Blast.sh)
         cp ${arbeitsvz}/Assembly/Assembly/454AllContigs.fna .                                                                   # copy Contig-file to folder
         sed '1,2d' Blast/Blast-Hits.txt > 454AllContigs-BlastnHits.txt                                                          # move blast results and delete first two rows (header and one empty row)
@@ -120,21 +151,33 @@ if [[ -s Assembly/454ReadStatus.txt ]] && [[ -s Assembly/454AllContigs.fna ]]
         #cp -R ${outputordner}/Blast/ ${arbeitsvz}/AssemblyBlast_`date| perl -lne '~s/ //g;print;'`
         # ==================================================== #
         rm ${outputordner}/Blast/*                                                                                              # remove all input in Blastfolder for next blast
+        END_20=$(date +%s)
+        DIFF_20=$(( $END_20 - $START_20 ))
+        echo -ne "\nTIMING\t${DIFF_20}\tProcessing assembled contigs blastn results"
+        echo -ne "\n\n-----{Megablast Contigs against Nucleotide Database - End [`date`]}-----"
 
-        echo -ne "\n\nRunning Blastn of unassigned contigs v nt"
+        echo -ne "\n\n-----{Blastn of Unassigned Contigs against Nucleotide Database - Start [`date`]}-----"
+        echo -ne "\n[$(date)] Running Blastn of unassigned contigs against ntdb..."
+        START_21=$(date +%s)
         blastvek=(0 0 tax 0 0)                                                                                                  # set blastvek for Blast.sh
         query=${outputordner}/unassignedContigs.fna                                                                             # set query for Blast.sh
         blastordner=${outputordner}/Blast                                                                                       # set blastfolder for Blast.sh
         ntblast=blastn                                                                                                          # set which blast for Blast.sh
         referenz=$ntdb                                                                                                          # set reference for Blast.sh 
         . $installdir/Blast.sh                                                                                                  # Blast.sh
-        
+        END_21=$(date +%s)
+        DIFF_21=$(( $END_21 - $START_21 ))
+        echo -ne "\nTIMING\t${DIFF_21}\tBlastn of unassigned contigs during assembly contigs blast"
+
+        START_ASSEMBLYPROC=$(date +%s)
+        echo -ne "\n[`date`] Post processing unassigned contigs blastn results."
         cd $outputordner
         sed '1,2d' Blast/Blast-Hits.txt | cat >> 454AllContigs-BlastnHits.txt                                                   # move Blast-Hits and delete the first to lines (header and empty)
         
         i=`wc -l < 454AllContigs-BlastnHits.txt`                                                                                # count blast hits (one line one hit)
         if (( $i > 0 ))                                                                                                         # if at least one blast hit, then ...
             then
+                START_22=$(date +%s)
                 printf "Assembly\n%.0s" $(seq 1 $i) > tmp1.txt                                                                  # print the method as often as blast hits in temporary file
                     
                 paste tmp1.txt 454AllContigs-BlastnHits.txt > contig_method.txt                                                 # paste temp file and blast hits to assign method to results
@@ -168,13 +211,17 @@ if [[ -s Assembly/454ReadStatus.txt ]] && [[ -s Assembly/454AllContigs.fna ]]
                         fi                                                                                                                                      
                     done < names-taxid.txt                                                                                                                                      
                 cat *_names.txt > contig_names_method.txt & wait                                                                # cat all names files                                                                        
-                rm *_names.txt                                                                                                  # and remove them subsequently (not needed anymore)                                   
+                rm *_names.txt                                                                                                  # and remove them subsequently (not needed anymore)
+                END_22=$(date +%s)
+                DIFF_22=$(( $END_22 - $START_22 ))
+                echo -ne "\nTIMING\t${DIFF_22}\tObtaining species information during assembly contigs blast"
 
                 awk 'BEGIN {FS="\t"} {x="for_asigning.txt"} {print $2 FS $1 FS $11 FS $10 FS $9 FS $12 FS $8 > x}' < contig_names_method.txt    # change order of columns of the contig_names_method file                                                                                                                                    
                 cut -f 1 454AllContigs-BlastnHits.txt > contigs.txt                                                             # cut first column to get contig names                                                                        
-                wait                                                                                                                                        
+                #wait
 
-                if [[ -s Assembly/Megablast_Assigned.txt ]]                                                                     # if the file Megablast_Assigned.txt exists and is not empty, then ...                                                                
+                START_23=$(date +%s)
+                if [[ -s Assembly/Megablast_Assigned.txt ]]                                                                     # if the file Megablast_Assigned.txt exists and is not empty, then ...
                     then                                                                                                                                        
                         while read line                                                                                         # while reading the contig-file, do...                                               
                             do                                                                                                                                      
@@ -212,13 +259,20 @@ if [[ -s Assembly/454ReadStatus.txt ]] && [[ -s Assembly/454AllContigs.fna ]]
                             done < for_asigning.txt                                                                          
                 fi                                                                                                        
 
+                END_23=$(date +%s)
+                DIFF_23=$(( $END_23 - $START_23 ))
+                echo -ne "\nTIMING\t${DIFF_23}\tPost processing with species information during assembly contigs blast"
+
                 cat *.info >> Assembly_Reads.txt                                                                                # cat all info files (info for all assigned Reads)
                 cat Assembly_Reads.txt >> ${arbeitsvz}/asignedAcc.txt                                                           # add assigned Reads to asignedAcc.txt
                 cut -f7 ${arbeitsvz}/asignedAcc.txt | sort | uniq > ${arbeitsvz}/excludeAcc.txt                                 # get a list of reads to exclude for further steps
                 comm -3 ${arbeitsvz}/excludeAcc.txt ${arbeitsvz}/allAcc.txt | sed -e 's/^[ \t]*//' > ${arbeitsvz}/restAcc.txt   # get rest Reads
                 restreads=`wc -l ${arbeitsvz}/restAcc.txt | cut -d " " -f1`                                                     # count rest Reads
-        fi                                                                                                   
-        #rm *info; rm *contig*                                                                             
+        fi
+        END_ASSEMBLYPROC=$(date +%s)
+        DIFF_ASSEMBLYPROC=$(( $END_ASSEMBLYPROC - $START_ASSEMBLYPROC ))
+        echo -ne "\nTIMING\t${DIFF_ASSEMBLYPROC}\tPost processing unassigned contigs blastn results"
+        #rm *info; rm *contig*
 #        if [[ -s Assembly_Reads.txt ]]
 #            then
 #                assfailcounter=0                                                                                                # set counter back to 0
@@ -227,4 +281,5 @@ if [[ -s Assembly/454ReadStatus.txt ]] && [[ -s Assembly/454AllContigs.fna ]]
 #        fi
         
         echo -ne "finished! --> $(date)\n"                                                                                                  # user info
+        echo -ne "\n\n-----{Blastn of Unassigned Contigs against Nucleotide Database - Start [`date`]}-----"
 fi
